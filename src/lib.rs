@@ -1828,24 +1828,36 @@ mod tests {
 
     #[test]
     fn test_basic_keyword_and_symbol() {
-        assert!(equal(&parse_str("name").unwrap(), &parse_str("name").unwrap()));
+        assert!(equal(
+            &parse_str("name").unwrap(),
+            &parse_str("name").unwrap()
+        ));
         assert!(equal(
             &parse_str("person/name").unwrap(),
             &parse_str("person/name").unwrap()
         ));
-        assert!(equal(&parse_str(":name").unwrap(), &parse_str(":name").unwrap()));
+        assert!(equal(
+            &parse_str(":name").unwrap(),
+            &parse_str(":name").unwrap()
+        ));
         assert!(equal(
             &parse_str(":person/name").unwrap(),
             &parse_str(":person/name").unwrap()
         ));
 
         // Had an issue with whitespace
-        assert!(equal(&parse_str("name ").unwrap(), &parse_str("name ").unwrap()));
+        assert!(equal(
+            &parse_str("name ").unwrap(),
+            &parse_str("name ").unwrap()
+        ));
         assert!(equal(
             &parse_str("person/name ").unwrap(),
             &parse_str("person/name ").unwrap()
         ));
-        assert!(equal(&parse_str(":name ").unwrap(), &parse_str(":name ").unwrap()));
+        assert!(equal(
+            &parse_str(":name ").unwrap(),
+            &parse_str(":name ").unwrap()
+        ));
         assert!(equal(
             &parse_str(":person/name ").unwrap(),
             &parse_str(":person/name ").unwrap()
@@ -1919,7 +1931,10 @@ mod tests {
 
     #[test]
     fn test_parse_neg_float() {
-        assert_eq!(Value::Float(OrderedFloat(-12.1)), parse_str("-12.1").unwrap())
+        assert_eq!(
+            Value::Float(OrderedFloat(-12.1)),
+            parse_str("-12.1").unwrap()
+        )
     }
 
     #[test]
@@ -1929,7 +1944,10 @@ mod tests {
 
     #[test]
     fn test_parse_pos_float() {
-        assert_eq!(Value::Float(OrderedFloat(12.1)), parse_str("+12.1").unwrap())
+        assert_eq!(
+            Value::Float(OrderedFloat(12.1)),
+            parse_str("+12.1").unwrap()
+        )
     }
 
     #[test]
@@ -1948,13 +1966,34 @@ mod tests {
 
     #[test]
     fn test_parse_e() {
-        assert_eq!(Value::Float(OrderedFloat(1000.0)), parse_str("10e+2").unwrap());
-        assert_eq!(Value::Float(OrderedFloat(1200.0)), parse_str("12e+2").unwrap());
-        assert_eq!(Value::Float(OrderedFloat(1200.0)), parse_str("12e2").unwrap());
-        assert_eq!(Value::Float(OrderedFloat(1200.0)), parse_str("12E2").unwrap());
-        assert_eq!(Value::Float(OrderedFloat(5200.0)), parse_str("52E+2").unwrap());
-        assert_eq!(Value::Float(OrderedFloat(1.2)), parse_str("120e-2").unwrap());
-        assert_eq!(Value::Float(OrderedFloat(1.2)), parse_str("120E-2").unwrap());
+        assert_eq!(
+            Value::Float(OrderedFloat(1000.0)),
+            parse_str("10e+2").unwrap()
+        );
+        assert_eq!(
+            Value::Float(OrderedFloat(1200.0)),
+            parse_str("12e+2").unwrap()
+        );
+        assert_eq!(
+            Value::Float(OrderedFloat(1200.0)),
+            parse_str("12e2").unwrap()
+        );
+        assert_eq!(
+            Value::Float(OrderedFloat(1200.0)),
+            parse_str("12E2").unwrap()
+        );
+        assert_eq!(
+            Value::Float(OrderedFloat(5200.0)),
+            parse_str("52E+2").unwrap()
+        );
+        assert_eq!(
+            Value::Float(OrderedFloat(1.2)),
+            parse_str("120e-2").unwrap()
+        );
+        assert_eq!(
+            Value::Float(OrderedFloat(1.2)),
+            parse_str("120E-2").unwrap()
+        );
         assert_eq!(
             Value::Float(OrderedFloat(1422141241242142142141241.124)),
             parse_str("1422141241242142142141241.124E0").unwrap()
@@ -1968,7 +2007,10 @@ mod tests {
 
     #[test]
     fn test_parse_bigdec() {
-        assert_eq!(Value::BigDec(BigDecimal::from(123)), parse_str("123M").unwrap());
+        assert_eq!(
+            Value::BigDec(BigDecimal::from(123)),
+            parse_str("123M").unwrap()
+        );
     }
 
     #[test]
@@ -2109,7 +2151,10 @@ mod tests {
             vals.push(Value::Integer(i))
         }
         let ser = emit_str(&Value::Set(BTreeSet::from_iter(vals.clone())));
-        assert_eq!(parse_str(&ser).unwrap(), Value::Set(BTreeSet::from_iter(vals)));
+        assert_eq!(
+            parse_str(&ser).unwrap(),
+            Value::Set(BTreeSet::from_iter(vals))
+        );
     }
 
     #[test]
@@ -2122,7 +2167,10 @@ mod tests {
             ))
         }
         let ser = emit_str(&Value::Map(BTreeMap::from_iter(vals.clone())));
-        assert_eq!(parse_str(&ser).unwrap(), Value::Map(BTreeMap::from_iter(vals)));
+        assert_eq!(
+            parse_str(&ser).unwrap(),
+            Value::Map(BTreeMap::from_iter(vals))
+        );
     }
 
     #[test]
