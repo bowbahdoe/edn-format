@@ -12,11 +12,11 @@ use std::num::{ParseFloatError, ParseIntError};
 use thiserror::Error;
 use uuid::Uuid;
 
-/// A keyword, as described in EDN data model is identifier which should
+/// A keyword, as described in EDN data model, is identifier which should
 /// "designate itself".
 ///
 /// Because its contents are interned, cloning and comparisons should be relatively
-/// cheap operations, while construction is relatively not.
+/// cheap operations and construction relatively expensive.
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Keyword {
     namespace: Option<IStr>,
@@ -24,12 +24,12 @@ pub struct Keyword {
 }
 
 impl Keyword {
-    /// The namespace of the keyword, if there is one
+    /// The namespace of the keyword, if there is one.
     pub fn namespace(&self) -> Option<&str> {
         self.namespace.as_ref().map(|s| s.as_str())
     }
 
-    /// The name of the keyword
+    /// The name of the keyword.
     pub fn name(&self) -> &str {
         self.name.as_str()
     }
@@ -57,7 +57,7 @@ impl Keyword {
 }
 
 /// If the namespace and name of the symbol follow the proper rules, displaying
-/// a keyword should give valid edn
+/// a keyword should give valid EDN.
 impl Display for Keyword {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match &self.namespace {
@@ -67,10 +67,10 @@ impl Display for Keyword {
     }
 }
 
-/// A symbol, as described in EDN data model is an identifier.
+/// A symbol, as described in EDN data model, is an identifier.
 ///
 /// Because its contents are interned, cloning and comparisons should be relatively
-/// cheap operations, while construction is relatively not.
+/// cheap operations and construction relatively expensive.
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Symbol {
     namespace: Option<IStr>,
@@ -78,12 +78,12 @@ pub struct Symbol {
 }
 
 impl Symbol {
-    /// The namespace of the symbol, if there is one
+    /// The namespace of the symbol, if there is one.
     pub fn namespace(&self) -> Option<&str> {
         self.namespace.as_ref().map(|s| s.as_str())
     }
 
-    /// The name of the symbol
+    /// The name of the symbol.
     pub fn name(&self) -> &str {
         self.name.as_str()
     }
@@ -111,7 +111,7 @@ impl Symbol {
 }
 
 /// If the namespace and name of the symbol follow the proper rules, displaying
-/// a symbol should give valid edn
+/// a symbol should give valid EDN.
 impl Display for Symbol {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match &self.namespace {
@@ -121,25 +121,91 @@ impl Display for Symbol {
     }
 }
 
-/// An Edn Value.
+/// An EDN Value.
 #[derive(Debug, Clone, Ord, PartialOrd, Eq)]
 pub enum Value {
+    /// `nil`. Analogous to `null`, nothing, zip, zilch, and nada.
+    ///
+    /// <https://github.com/edn-format/edn#nil>
     Nil,
+    /// A string. Used to represent textual data.
+    ///
+    /// <https://github.com/edn-format/edn#strings>
     String(String),
+    /// A single character.
+    ///
+    /// <https://github.com/edn-format/edn#characters>
     Character(char),
+    /// A symbol. Used to represent identifiers.
+    ///
+    /// <https://github.com/edn-format/edn#symbols>
     Symbol(Symbol),
+    /// A keyword. An identifier that designates itself. For typical use,
+    /// these should be used for keys in [Value::Map] instead of [Value::String].
+    ///
+    /// <https://github.com/edn-format/edn#keywords>
     Keyword(Keyword),
+    /// A signed integer
+    ///
+    /// <https://github.com/edn-format/edn#integers>
     Integer(i64),
+    /// A floating point number with 64 bit precision.
+    /// This implementation uses [ordered_float::OrderedFloat], so the result
+    /// you get does not directly conform to IEEE spec.
+    ///
+    /// <https://github.com/edn-format/edn#floating-point-numbers>
     Float(OrderedFloat<f64>),
+    /// An integer with arbitrary precision
+    ///
+    /// <https://github.com/edn-format/edn#integers>
     BigInt(BigInt),
+    /// A decimal number with exact precision
+    ///
+    /// <https://github.com/edn-format/edn#floating-point-numbers>
     BigDec(BigDecimal),
+    /// A list of values.
+    ///
+    /// <https://github.com/edn-format/edn#lists>
     List(Vec<Value>),
+    /// A vector of values. The major difference between this and a [Value::List]
+    /// is that a vector is guaranteed by the spec to support random access of
+    /// elements. In this implementation the semantic difference is maintained,
+    /// but the underlying data structure for both is a [Vec], which supports random
+    /// access.
+    ///
+    /// <https://github.com/edn-format/edn#vectors>
     Vector(Vec<Value>),
+    /// A collection of associations between keys and values. Supports any EDN value as a
+    /// key. No semantics should be associated with the order in which the pairs appear.
+    ///
+    /// <https://github.com/edn-format/edn#maps>
     Map(BTreeMap<Value, Value>),
+    /// A collection of unique values. No semantics should be associated with the order the
+    /// items appear.
+    ///
+    /// <https://github.com/edn-format/edn#sets>
     Set(BTreeSet<Value>),
+    /// A boolean value
+    ///
+    /// <https://github.com/edn-format/edn#booleans>
     Boolean(bool),
+    /// An instant in time. Represented as a tagged element with tag `inst` and value
+    /// a [RFC-3339](https://www.ietf.org/rfc/rfc3339.txt) formatted string.
+    ///
+    /// <https://github.com/edn-format/edn#inst-rfc-3339-format>
     Inst(chrono::DateTime<FixedOffset>),
+    /// A UUID. Represented as a tagged element with tag `uuid` and value
+    /// a canonical UUID string.
+    ///
+    /// <https://github.com/edn-format/edn#uuid-f81d4fae-7dec-11d0-a765-00a0c91e6bf6>
     Uuid(Uuid),
+    /// A tagged element. This can be used to encode any kind of data as a distinct
+    /// readable element, with semantics determined by the reader and writer.
+    ///
+    /// Overriding the behavior of elements tagged with `inst` and `uuid` is not supported
+    /// in this implementation.
+    ///
+    /// <https://github.com/edn-format/edn#tagged-elements>
     TaggedElement(Symbol, Box<Value>),
 }
 
@@ -1191,14 +1257,14 @@ fn replace_numeric_types(value: &mut Value) -> Result<(), ParserError> {
     }
 }
 
-/// Options you can pass to the EDN parser
+/// Options you can pass to the EDN parser.
 #[derive(Debug, Copy, Clone)]
 pub struct ParserOptions {
     /// Whether to return errors with the context of what forms the parser was
     /// parsing and the line numbers where the errors occurred.
     ///
     /// This is currently done on a "best effort" basis and some errors, like those that arise
-    /// parsing numbers, are currently not eligible for this tracking
+    /// parsing numbers, are currently not eligible for this tracking.
     ///
     /// Defaults to false.
     pub track_line_numbers: bool,
@@ -1279,7 +1345,7 @@ pub fn parse_with_options(s: &str, opts: ParserOptions) -> Result<Value, ParserE
     }
 }
 
-/// Parse Edn from the given input string with default options.
+/// Parse EDN from the given input string with default options.
 pub fn parse(s: &str) -> Result<Value, ParserError> {
     parse_with_options(s, ParserOptions::default())
 }
@@ -1400,7 +1466,7 @@ impl Display for Value {
     }
 }
 
-/// Emit the given Edn value as a String.
+/// Emit the given EDN value as a String.
 pub fn emit(value: &Value) -> String {
     format!("{}", value)
 }

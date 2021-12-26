@@ -1,11 +1,12 @@
 [package]
-name = "edn_data_format"
+name = "edn_format"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
 keywords = ["serialization", "serde", "edn"]
 categories = ["encoding", "parser-implementations"]
 include = ["/src", "Cargo.toml", "README.md", "LICENSE.txt"]
+description = "Rust implementation of the EDN data format"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
