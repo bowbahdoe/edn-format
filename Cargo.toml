@@ -7,8 +7,8 @@ keywords = ["serialization", "serde", "edn"]
 categories = ["encoding", "parser-implementations"]
 include = ["/src", "Cargo.toml", "README.md", "LICENSE.txt"]
 description = "Rust implementation of EDN (Extensible Data Notation)"
-homepage = "https://github.com/bowbahdoe/edn_format"
-repository = "https://github.com/bowbahdoe/edn_format"
+homepage = "https://github.com/bowbahdoe/edn-format"
+repository = "https://github.com/bowbahdoe/edn-format"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
