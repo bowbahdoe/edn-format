@@ -1291,7 +1291,7 @@ impl Default for ParserOptions {
 }
 
 /// Parse EDN from the given input string with the given options.
-pub fn parse_with_options(s: &str, opts: ParserOptions) -> Result<Value, ParserError> {
+pub fn parse_str_with_options(s: &str, opts: ParserOptions) -> Result<Value, ParserError> {
     let chars: Vec<char> = s.chars().collect();
     if opts.track_line_numbers {
         let mut context = ContextStackerObserver::new();
@@ -1346,8 +1346,8 @@ pub fn parse_with_options(s: &str, opts: ParserOptions) -> Result<Value, ParserE
 }
 
 /// Parse EDN from the given input string with default options.
-pub fn parse(s: &str) -> Result<Value, ParserError> {
-    parse_with_options(s, ParserOptions::default())
+pub fn parse_str(s: &str) -> Result<Value, ParserError> {
+    parse_str_with_options(s, ParserOptions::default())
 }
 
 impl Display for Value {
@@ -1467,7 +1467,7 @@ impl Display for Value {
 }
 
 /// Emit the given EDN value as a String.
-pub fn emit(value: &Value) -> String {
+pub fn emit_str(value: &Value) -> String {
     format!("{}", value)
 }
 
@@ -1498,12 +1498,12 @@ mod tests {
 
     #[test]
     fn test_parsing_empty_list() {
-        assert_eq!(Value::List(vec![]), parse("()").unwrap())
+        assert_eq!(Value::List(vec![]), parse_str("()").unwrap())
     }
 
     #[test]
     fn test_parsing_empty_vector() {
-        assert_eq!(Value::Vector(vec![]), parse("[]").unwrap())
+        assert_eq!(Value::Vector(vec![]), parse_str("[]").unwrap())
     }
 
     #[test]
@@ -1515,7 +1515,7 @@ mod tests {
                 Value::List(vec![]),
                 Value::Vector(vec![])
             ]),
-            parse("[()[]()[]]").unwrap()
+            parse_str("[()[]()[]]").unwrap()
         )
     }
 
@@ -1528,7 +1528,7 @@ mod tests {
                 Value::List(vec![]),
                 Value::Vector(vec![])
             ]),
-            parse("   ,, , [ ,, , ,()[,,,]( ) []]").unwrap()
+            parse_str("   ,, , [ ,, , ,()[,,,]( ) []]").unwrap()
         )
     }
 
@@ -1536,16 +1536,16 @@ mod tests {
     fn test_parsing_empty_map() {
         assert_eq!(
             Value::Map(BTreeMap::from_iter(vec![])),
-            parse("{}").unwrap()
+            parse_str("{}").unwrap()
         )
     }
 
     #[test]
     fn test_parsing_uneven_map() {
-        assert_eq!(Err(ParserError::OddNumberOfMapElements), parse("{()}"));
+        assert_eq!(Err(ParserError::OddNumberOfMapElements), parse_str("{()}"));
         assert_eq!(
             Err(ParserError::OddNumberOfMapElements),
-            parse("{() [] []}")
+            parse_str("{() [] []}")
         )
     }
 
@@ -1556,14 +1556,14 @@ mod tests {
                 Value::List(vec![]),
                 Value::List(vec![])
             )])),
-            parse("{() ()}").unwrap()
+            parse_str("{() ()}").unwrap()
         );
         assert_eq!(
             Value::Map(BTreeMap::from_iter(vec![
                 (Value::List(vec![]), Value::Vector(vec![])),
                 (Value::Keyword(Keyword::from_name("a")), Value::List(vec![]))
             ])),
-            parse("{()[] :a ()}").unwrap()
+            parse_str("{()[] :a ()}").unwrap()
         )
     }
 
@@ -1574,13 +1574,13 @@ mod tests {
                 Value::List(vec![]),
                 Value::List(vec![])
             )])),
-            parse("{() ()}").unwrap()
+            parse_str("{() ()}").unwrap()
         );
         assert_eq!(
             Err(ParserError::DuplicateKeyInMap {
                 value: Value::List(vec![])
             }),
-            parse("{()[] () ()}")
+            parse_str("{()[] () ()}")
         )
     }
 
@@ -1605,7 +1605,7 @@ mod tests {
     fn test_parsing_string() {
         assert_eq!(
             Value::String("ꪪ".to_string()),
-            parse("\"\\uAAAA\"").unwrap()
+            parse_str("\"\\uAAAA\"").unwrap()
         )
     }
 
@@ -1613,7 +1613,7 @@ mod tests {
     fn test_parsing_string_nested() {
         assert_eq!(
             Value::Vector(vec![Value::String("ꪪ".to_string())]),
-            parse("[\"\\uAAAA\"]").unwrap()
+            parse_str("[\"\\uAAAA\"]").unwrap()
         )
     }
 
@@ -1621,7 +1621,7 @@ mod tests {
     fn test_parsing_multiline_string() {
         assert_eq!(
             Value::String("abc\n    \ndef    \n".to_string()),
-            parse("\"abc\n    \ndef    \n\"").unwrap()
+            parse_str("\"abc\n    \ndef    \n\"").unwrap()
         )
     }
 
@@ -1632,7 +1632,7 @@ mod tests {
                 Value::String("abc".to_string()),
                 Value::String("def".to_string())
             )])),
-            parse("{\"abc\" \"def\"}").unwrap()
+            parse_str("{\"abc\" \"def\"}").unwrap()
         );
 
         assert_eq!(
@@ -1640,7 +1640,7 @@ mod tests {
                 Value::String("abc".to_string()),
                 Value::String("def".to_string())
             )])),
-            parse("{\"abc\"\"def\"}").unwrap()
+            parse_str("{\"abc\"\"def\"}").unwrap()
         )
     }
 
@@ -1648,7 +1648,7 @@ mod tests {
     fn test_parsing_inst() {
         assert_eq!(
             Value::Inst(DateTime::parse_from_rfc3339("1985-04-12T23:20:50.52Z").unwrap()),
-            parse("#inst\"1985-04-12T23:20:50.52Z\"").unwrap()
+            parse_str("#inst\"1985-04-12T23:20:50.52Z\"").unwrap()
         )
     }
 
@@ -1656,7 +1656,7 @@ mod tests {
     fn test_parsing_uuid() {
         assert_eq!(
             Value::Uuid(Uuid::parse_str("f81d4fae-7dec-11d0-a765-00a0c91e6bf6").unwrap()),
-            parse("#uuid\"f81d4fae-7dec-11d0-a765-00a0c91e6bf6\"").unwrap()
+            parse_str("#uuid\"f81d4fae-7dec-11d0-a765-00a0c91e6bf6\"").unwrap()
         )
     }
 
@@ -1671,7 +1671,7 @@ mod tests {
                 Value::Symbol(Symbol::from_name("/")),
                 Value::Symbol(Symbol::from_namespace_and_name("my.org", "stuff")),
             ]),
-            parse("[ a  abc abc/def -> / my.org/stuff ]").unwrap()
+            parse_str("[ a  abc abc/def -> / my.org/stuff ]").unwrap()
         );
     }
 
@@ -1679,23 +1679,23 @@ mod tests {
     fn test_parsing_symbol_errs() {
         assert_eq!(
             Err(ParserError::CannotHaveSlashAtBeginningOfSymbol),
-            parse("/abc")
+            parse_str("/abc")
         );
         assert_eq!(
             Err(ParserError::CannotHaveSlashAtEndOfSymbol),
-            parse("abc/")
+            parse_str("abc/")
         );
         assert_eq!(
             Err(ParserError::CannotHaveSlashAtEndOfSymbol),
-            parse("abc/ ")
+            parse_str("abc/ ")
         );
         assert_eq!(
             Err(ParserError::CannotHaveSlashAtEndOfSymbol),
-            parse("abc/ []")
+            parse_str("abc/ []")
         );
         assert_eq!(
             Err(ParserError::CannotHaveMoreThanOneSlashInSymbol),
-            parse("a/b/c")
+            parse_str("a/b/c")
         );
     }
 
@@ -1710,7 +1710,7 @@ mod tests {
                 Value::Keyword(Keyword::from_name("/")),
                 Value::Keyword(Keyword::from_namespace_and_name("my.org", "stuff")),
             ]),
-            parse("[ :a  :abc :abc/def :-> :/ :my.org/stuff ]").unwrap()
+            parse_str("[ :a  :abc :abc/def :-> :/ :my.org/stuff ]").unwrap()
         );
     }
 
@@ -1718,25 +1718,25 @@ mod tests {
     fn test_parsing_keyword_errs() {
         assert_eq!(
             Err(ParserError::CannotHaveSlashAtBeginningOfKeyword),
-            parse(":/abc")
+            parse_str(":/abc")
         );
         assert_eq!(
             Err(ParserError::CannotHaveSlashAtEndOfKeyword),
-            parse(":abc/")
+            parse_str(":abc/")
         );
         assert_eq!(
             Err(ParserError::CannotHaveSlashAtEndOfKeyword),
-            parse(":abc/ ")
+            parse_str(":abc/ ")
         );
         assert_eq!(
             Err(ParserError::CannotHaveSlashAtEndOfKeyword),
-            parse(":abc/ []")
+            parse_str(":abc/ []")
         );
         assert_eq!(
             Err(ParserError::CannotHaveMoreThanOneSlashInKeyword),
-            parse(":a/b/c")
+            parse_str(":a/b/c")
         );
-        assert_eq!(Err(ParserError::InvalidKeyword), parse("::namespaced"));
+        assert_eq!(Err(ParserError::InvalidKeyword), parse_str("::namespaced"));
     }
 
     #[test]
@@ -1750,14 +1750,14 @@ mod tests {
                 ]
                 .into_iter()
             )),
-            parse("#{:abc :def :ghi/jkl }").unwrap()
+            parse_str("#{:abc :def :ghi/jkl }").unwrap()
         );
 
         assert_eq!(
             Err(ParserError::DuplicateValueInSet {
                 value: Value::Symbol(Symbol::from_name("a"))
             }),
-            parse("#{a b c d e f a g h}")
+            parse_str("#{a b c d e f a g h}")
         )
     }
 
@@ -1814,7 +1814,7 @@ mod tests {
                     )]))
                 )
             ])),
-            parse(
+            parse_str(
                 "\
             {:person/name \"Joe\"\
              :person/parent \"Bob\"\
@@ -1828,34 +1828,34 @@ mod tests {
 
     #[test]
     fn test_basic_keyword_and_symbol() {
-        assert!(equal(&parse("name").unwrap(), &parse("name").unwrap()));
+        assert!(equal(&parse_str("name").unwrap(), &parse_str("name").unwrap()));
         assert!(equal(
-            &parse("person/name").unwrap(),
-            &parse("person/name").unwrap()
+            &parse_str("person/name").unwrap(),
+            &parse_str("person/name").unwrap()
         ));
-        assert!(equal(&parse(":name").unwrap(), &parse(":name").unwrap()));
+        assert!(equal(&parse_str(":name").unwrap(), &parse_str(":name").unwrap()));
         assert!(equal(
-            &parse(":person/name").unwrap(),
-            &parse(":person/name").unwrap()
+            &parse_str(":person/name").unwrap(),
+            &parse_str(":person/name").unwrap()
         ));
 
         // Had an issue with whitespace
-        assert!(equal(&parse("name ").unwrap(), &parse("name ").unwrap()));
+        assert!(equal(&parse_str("name ").unwrap(), &parse_str("name ").unwrap()));
         assert!(equal(
-            &parse("person/name ").unwrap(),
-            &parse("person/name ").unwrap()
+            &parse_str("person/name ").unwrap(),
+            &parse_str("person/name ").unwrap()
         ));
-        assert!(equal(&parse(":name ").unwrap(), &parse(":name ").unwrap()));
+        assert!(equal(&parse_str(":name ").unwrap(), &parse_str(":name ").unwrap()));
         assert!(equal(
-            &parse(":person/name ").unwrap(),
-            &parse(":person/name ").unwrap()
+            &parse_str(":person/name ").unwrap(),
+            &parse_str(":person/name ").unwrap()
         ));
     }
 
     #[test]
     fn test_complex_equals() {
         assert!(equal(
-            &parse(
+            &parse_str(
                 "\
             {:person/parent \"Bob\"\
              :person/name \"Joe\"\
@@ -1864,7 +1864,7 @@ mod tests {
              \"other\" {:stuff :here}}"
             )
             .unwrap(),
-            &parse(
+            &parse_str(
                 "\
             {:person/name \"Joe\"\
              :person/parent \"Bob\"\
@@ -1884,7 +1884,7 @@ mod tests {
                 Value::Boolean(false),
                 Value::Boolean(true)
             ]),
-            parse("(nil false true)").unwrap()
+            parse_str("(nil false true)").unwrap()
         )
     }
 
@@ -1898,77 +1898,77 @@ mod tests {
                 (Value::Character('r'), Value::Character('c')),
                 (Value::Character('\t'), Value::Character('d')),
             ])),
-            parse("{\\space \\z\\a \\newline \\b \\return \\r \\c \\tab \\d}").unwrap()
+            parse_str("{\\space \\z\\a \\newline \\b \\return \\r \\c \\tab \\d}").unwrap()
         )
     }
 
     #[test]
     fn test_parse_int() {
-        assert_eq!(Value::Integer(123), parse("123").unwrap())
+        assert_eq!(Value::Integer(123), parse_str("123").unwrap())
     }
 
     #[test]
     fn test_parse_float() {
-        assert_eq!(Value::Float(OrderedFloat(12.1)), parse("12.1").unwrap())
+        assert_eq!(Value::Float(OrderedFloat(12.1)), parse_str("12.1").unwrap())
     }
 
     #[test]
     fn test_parse_neg_int() {
-        assert_eq!(Value::Integer(-123), parse("-123").unwrap())
+        assert_eq!(Value::Integer(-123), parse_str("-123").unwrap())
     }
 
     #[test]
     fn test_parse_neg_float() {
-        assert_eq!(Value::Float(OrderedFloat(-12.1)), parse("-12.1").unwrap())
+        assert_eq!(Value::Float(OrderedFloat(-12.1)), parse_str("-12.1").unwrap())
     }
 
     #[test]
     fn test_parse_pos_int() {
-        assert_eq!(Value::Integer(123), parse("+123").unwrap())
+        assert_eq!(Value::Integer(123), parse_str("+123").unwrap())
     }
 
     #[test]
     fn test_parse_pos_float() {
-        assert_eq!(Value::Float(OrderedFloat(12.1)), parse("+12.1").unwrap())
+        assert_eq!(Value::Float(OrderedFloat(12.1)), parse_str("+12.1").unwrap())
     }
 
     #[test]
     fn test_parse_zero() {
-        assert_eq!(Value::Integer(0), parse("+0").unwrap(),);
-        assert_eq!(Value::Integer(0), parse("0").unwrap(),);
-        assert_eq!(Value::Integer(0), parse("-0").unwrap(),);
+        assert_eq!(Value::Integer(0), parse_str("+0").unwrap(),);
+        assert_eq!(Value::Integer(0), parse_str("0").unwrap(),);
+        assert_eq!(Value::Integer(0), parse_str("-0").unwrap(),);
     }
 
     #[test]
     fn test_parse_zero_float() {
-        assert_eq!(Value::Float(OrderedFloat(0f64)), parse("+0.").unwrap());
-        assert_eq!(Value::Float(OrderedFloat(0f64)), parse("0.").unwrap());
-        assert_eq!(Value::Float(OrderedFloat(0f64)), parse("-0.").unwrap());
+        assert_eq!(Value::Float(OrderedFloat(0f64)), parse_str("+0.").unwrap());
+        assert_eq!(Value::Float(OrderedFloat(0f64)), parse_str("0.").unwrap());
+        assert_eq!(Value::Float(OrderedFloat(0f64)), parse_str("-0.").unwrap());
     }
 
     #[test]
     fn test_parse_e() {
-        assert_eq!(Value::Float(OrderedFloat(1000.0)), parse("10e+2").unwrap());
-        assert_eq!(Value::Float(OrderedFloat(1200.0)), parse("12e+2").unwrap());
-        assert_eq!(Value::Float(OrderedFloat(1200.0)), parse("12e2").unwrap());
-        assert_eq!(Value::Float(OrderedFloat(1200.0)), parse("12E2").unwrap());
-        assert_eq!(Value::Float(OrderedFloat(5200.0)), parse("52E+2").unwrap());
-        assert_eq!(Value::Float(OrderedFloat(1.2)), parse("120e-2").unwrap());
-        assert_eq!(Value::Float(OrderedFloat(1.2)), parse("120E-2").unwrap());
+        assert_eq!(Value::Float(OrderedFloat(1000.0)), parse_str("10e+2").unwrap());
+        assert_eq!(Value::Float(OrderedFloat(1200.0)), parse_str("12e+2").unwrap());
+        assert_eq!(Value::Float(OrderedFloat(1200.0)), parse_str("12e2").unwrap());
+        assert_eq!(Value::Float(OrderedFloat(1200.0)), parse_str("12E2").unwrap());
+        assert_eq!(Value::Float(OrderedFloat(5200.0)), parse_str("52E+2").unwrap());
+        assert_eq!(Value::Float(OrderedFloat(1.2)), parse_str("120e-2").unwrap());
+        assert_eq!(Value::Float(OrderedFloat(1.2)), parse_str("120E-2").unwrap());
         assert_eq!(
             Value::Float(OrderedFloat(1422141241242142142141241.124)),
-            parse("1422141241242142142141241.124E0").unwrap()
+            parse_str("1422141241242142142141241.124E0").unwrap()
         );
     }
 
     #[test]
     fn test_parse_bigint() {
-        assert_eq!(Value::BigInt(BigInt::from(123)), parse("123N").unwrap());
+        assert_eq!(Value::BigInt(BigInt::from(123)), parse_str("123N").unwrap());
     }
 
     #[test]
     fn test_parse_bigdec() {
-        assert_eq!(Value::BigDec(BigDecimal::from(123)), parse("123M").unwrap());
+        assert_eq!(Value::BigDec(BigDecimal::from(123)), parse_str("123M").unwrap());
     }
 
     #[test]
@@ -1995,7 +1995,7 @@ mod tests {
                 ]
 
             ),
-            parse("( 1 2 3 \"abc\"\n;; so here is where we do some wacky stuff \n [a b/qq ; and then here\n c \n \n;; aaa\n{12 34.5 :a \n;;aaadeafaef\nb}])").unwrap()
+            parse_str("( 1 2 3 \"abc\"\n;; so here is where we do some wacky stuff \n [a b/qq ; and then here\n c \n \n;; aaa\n{12 34.5 :a \n;;aaadeafaef\nb}])").unwrap()
         );
     }
 
@@ -2068,16 +2068,16 @@ mod tests {
                 )),
             ),
         ]));
-        assert_eq!(emit(&v1), emit(&parse(&emit(&v1)).unwrap()));
-        assert_eq!(emit(&v2), emit(&parse(&emit(&v2)).unwrap()));
+        assert_eq!(emit_str(&v1), emit_str(&parse_str(&emit_str(&v1)).unwrap()));
+        assert_eq!(emit_str(&v2), emit_str(&parse_str(&emit_str(&v2)).unwrap()));
 
         assert_eq!(
-            parse(&emit(&v1)).unwrap(),
-            parse(&emit(&parse(&emit(&v1)).unwrap())).unwrap()
+            parse_str(&emit_str(&v1)).unwrap(),
+            parse_str(&emit_str(&parse_str(&emit_str(&v1)).unwrap())).unwrap()
         );
         assert_eq!(
-            parse(&emit(&v2)).unwrap(),
-            parse(&emit(&parse(&emit(&v2)).unwrap())).unwrap()
+            parse_str(&emit_str(&v2)).unwrap(),
+            parse_str(&emit_str(&parse_str(&emit_str(&v2)).unwrap())).unwrap()
         );
     }
 
@@ -2087,9 +2087,9 @@ mod tests {
         for i in 0..100000 {
             vals.push(Value::Integer(i))
         }
-        let ser = emit(&Value::Vector(vals.clone()));
+        let ser = emit_str(&Value::Vector(vals.clone()));
         // shouldn't stack overflow
-        assert_eq!(parse(&ser).unwrap(), Value::Vector(vals));
+        assert_eq!(parse_str(&ser).unwrap(), Value::Vector(vals));
     }
 
     #[test]
@@ -2098,8 +2098,8 @@ mod tests {
         for i in 0..100000 {
             vals.push(Value::Integer(i))
         }
-        let ser = emit(&Value::List(vals.clone()));
-        assert_eq!(parse(&ser).unwrap(), Value::List(vals));
+        let ser = emit_str(&Value::List(vals.clone()));
+        assert_eq!(parse_str(&ser).unwrap(), Value::List(vals));
     }
 
     #[test]
@@ -2108,8 +2108,8 @@ mod tests {
         for i in 0..100000 {
             vals.push(Value::Integer(i))
         }
-        let ser = emit(&Value::Set(BTreeSet::from_iter(vals.clone())));
-        assert_eq!(parse(&ser).unwrap(), Value::Set(BTreeSet::from_iter(vals)));
+        let ser = emit_str(&Value::Set(BTreeSet::from_iter(vals.clone())));
+        assert_eq!(parse_str(&ser).unwrap(), Value::Set(BTreeSet::from_iter(vals)));
     }
 
     #[test]
@@ -2121,13 +2121,13 @@ mod tests {
                 Value::Integer(i),
             ))
         }
-        let ser = emit(&Value::Map(BTreeMap::from_iter(vals.clone())));
-        assert_eq!(parse(&ser).unwrap(), Value::Map(BTreeMap::from_iter(vals)));
+        let ser = emit_str(&Value::Map(BTreeMap::from_iter(vals.clone())));
+        assert_eq!(parse_str(&ser).unwrap(), Value::Map(BTreeMap::from_iter(vals)));
     }
 
     #[test]
     fn test_two_colons() {
-        assert_eq!(Err(ParserError::InvalidKeyword), parse("::"))
+        assert_eq!(Err(ParserError::InvalidKeyword), parse_str("::"))
     }
 
     #[test]
@@ -2138,7 +2138,7 @@ mod tests {
                 row_col: RowCol { row: 6, col: 1 },
                 error: Box::new(ParserError::InvalidKeyword)
             }),
-            parse_with_options(
+            parse_str_with_options(
                 "    ::",
                 ParserOptions {
                     track_line_numbers: true,
@@ -2152,7 +2152,7 @@ mod tests {
                 row_col: RowCol { row: 0, col: 1 },
                 error: Box::new(ParserError::EmptyInput)
             }),
-            parse_with_options(
+            parse_str_with_options(
                 "",
                 ParserOptions {
                     track_line_numbers: true,
@@ -2166,7 +2166,7 @@ mod tests {
                 row_col: RowCol { row: 5, col: 1 },
                 error: Box::new(ParserError::InvalidKeyword)
             }),
-            parse_with_options(
+            parse_str_with_options(
                 "   ::",
                 ParserOptions {
                     track_line_numbers: true,
@@ -2180,7 +2180,7 @@ mod tests {
                 row_col: RowCol { row: 2, col: 3 },
                 error: Box::new(ParserError::InvalidKeyword)
             }),
-            parse_with_options(
+            parse_str_with_options(
                 "   \n\n::",
                 ParserOptions {
                     track_line_numbers: true,
@@ -2198,7 +2198,7 @@ mod tests {
                 row_col: RowCol { row: 10, col: 1 },
                 error: Box::new(ParserError::InvalidKeyword)
             }),
-            parse_with_options(
+            parse_str_with_options(
                 " [ 1 2 ::a]",
                 ParserOptions {
                     track_line_numbers: true,
@@ -2218,7 +2218,7 @@ mod tests {
                 row_col: RowCol { row: 5, col: 5 },
                 error: Box::new(ParserError::InvalidKeyword)
             }),
-            parse_with_options(
+            parse_str_with_options(
                 " ( a b c \n#{ \n{ [ \n1 2 4\n  ::a  \n3]  3} } )",
                 ParserOptions {
                     track_line_numbers: true,
@@ -2232,7 +2232,7 @@ mod tests {
                 row_col: RowCol { row: 8, col: 1 },
                 error: Box::new(ParserError::UnexpectedEndOfInput)
             }),
-            parse_with_options(
+            parse_str_with_options(
                 " ( [] {}",
                 ParserOptions {
                     track_line_numbers: true,
@@ -2260,7 +2260,7 @@ mod tests {
                     Value::Keyword(Keyword::from_name("a"))
                 ),
             ])),
-            parse_with_options(
+            parse_str_with_options(
                 "#:apple.tree{:c 1 \"a\" 2 :d 3 :d.e/f :a}",
                 ParserOptions {
                     allow_namespaced_map_syntax: true,
