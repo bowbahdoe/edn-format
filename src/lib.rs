@@ -9,10 +9,8 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::iter::FromIterator;
 use std::num::{ParseFloatError, ParseIntError};
-use std::slice::Split;
 use thiserror::Error;
 use uuid::Uuid;
-use crate::ParserError::InvalidKeyword;
 
 /// A keyword, as described in EDN data model, is identifier which should
 /// "designate itself".
@@ -486,7 +484,7 @@ pub enum Context {
     ParsingMap(RowCol),
     ParsingSet(RowCol),
     ParsingString(RowCol),
-    ParsingAtom(RowCol)
+    ParsingAtom(RowCol),
 }
 
 #[derive(Debug)]
@@ -548,9 +546,9 @@ impl ParseObserver for ContextStackerObserver {
 }
 
 fn interpret_atom(atom: &[char]) -> Result<Value, ParserError> {
-    let char_slice_to_str = |chars: &[char]| chars.iter().map(|c| *c).collect::<String>();
+    let char_slice_to_str = |chars: &[char]| chars.iter().copied().collect::<String>();
     let starts_like_number = |chars: &[char]| {
-        chars.len() >= 1
+        !chars.is_empty()
             && (chars[0].is_numeric()
                 || (['+', '-'].contains(&chars[0]) && chars.len() >= 2 && chars[1].is_numeric()))
     };
@@ -559,7 +557,7 @@ fn interpret_atom(atom: &[char]) -> Result<Value, ParserError> {
         &['n', 'i', 'l'] => Ok(Value::Nil),
         &['t', 'r', 'u', 'e'] => Ok(Value::Boolean(true)),
         &['f', 'a', 'l', 's', 'e'] => Ok(Value::Boolean(false)),
-        &[':'] => Err(InvalidKeyword),
+        &[':'] => Err(ParserError::InvalidKeyword),
         &[':', '/'] => Ok(Value::Keyword(Keyword::from_name("/"))),
         &[':', '/', ..] => Err(ParserError::CannotHaveSlashAtBeginningOfKeyword),
         &[':', .., '/'] => Err(ParserError::CannotHaveSlashAtEndOfKeyword),
@@ -569,37 +567,42 @@ fn interpret_atom(atom: &[char]) -> Result<Value, ParserError> {
         &[':', ref rest @ ..] => {
             // TODO: make sure name is not a number
             let split: Vec<_> = rest.split(|c| *c == '/').collect();
-            match &split[..] {
-                &[name] => Ok(Value::Keyword(Keyword::from_name(&char_slice_to_str(name)))),
-                &[namespace, name] => {
+            match split[..] {
+                [name] => Ok(Value::Keyword(Keyword::from_name(&char_slice_to_str(name)))),
+                [namespace, name] => {
                     if starts_like_number(namespace) {
                         Err(ParserError::InvalidKeyword)
-                    }
-                    else {
+                    } else {
                         Ok(Value::Keyword(Keyword::from_namespace_and_name(
                             &char_slice_to_str(namespace),
                             &char_slice_to_str(name),
                         )))
                     }
-                },
+                }
                 _ => Err(ParserError::CannotHaveMoreThanOneSlashInKeyword),
             }
         }
         chars => {
             // TODO: Check if number
             let split: Vec<_> = chars.split(|c| *c == '/').collect();
-            match &split[..] {
-                &[name] => {
+            match split[..] {
+                [name] => {
                     if starts_like_number(name) {
-                        if name.ends_with(&['M']) && name.iter().filter(|c| **c == 'M').count() == 1 {
+                        if name.ends_with(&['M']) && name.iter().filter(|c| **c == 'M').count() == 1
+                        {
                             Ok(Value::BigDec(
-                                str::parse::<BigDecimal>(&char_slice_to_str(&chars[..chars.len() - 1]))
-                                    .map_err(|err| ParserError::BadBigDec {
+                                str::parse::<BigDecimal>(&char_slice_to_str(
+                                    &chars[..chars.len() - 1],
+                                ))
+                                .map_err(|err| {
+                                    ParserError::BadBigDec {
                                         parsing: char_slice_to_str(chars),
                                         encountered: err,
-                                    })?,
+                                    }
+                                })?,
                             ))
-                        } else if name.contains(&'.') || name.contains(&'e') || name.contains(&'E') {
+                        } else if name.contains(&'.') || name.contains(&'e') || name.contains(&'E')
+                        {
                             Ok(Value::Float(OrderedFloat(
                                 str::parse::<f64>(&char_slice_to_str(chars)).map_err(|err| {
                                     ParserError::BadFloat {
@@ -608,18 +611,18 @@ fn interpret_atom(atom: &[char]) -> Result<Value, ParserError> {
                                     }
                                 })?,
                             )))
-                        } else if name != &['0'] && (name.starts_with(&['0']))
-                            || (name != &['+', '0']
-                            && (name.len() > 1
-                            && name.starts_with(&['+'])
-                            && name[1..].starts_with(&['0'])))
-                            || (name != &['-', '0']
-                            && (name.len() > 1
-                            && name.starts_with(&['-'])
-                            && name[1..].starts_with(&['0'])))
+                        } else if name != ['0'] && (name.starts_with(&['0']))
+                            || (name != ['+', '0']
+                                && (name.len() > 1
+                                    && name.starts_with(&['+'])
+                                    && name[1..].starts_with(&['0'])))
+                            || (name != ['-', '0']
+                                && (name.len() > 1
+                                    && name.starts_with(&['-'])
+                                    && name[1..].starts_with(&['0'])))
                         {
                             // Only ints are subject to this restriction it seems
-                            return Err(ParserError::OnlyZeroCanStartWithZero);
+                            Err(ParserError::OnlyZeroCanStartWithZero)
                         } else if name.ends_with(&['N'])
                             && name.iter().filter(|c| **c == 'N').count() == 1
                         {
@@ -631,29 +634,29 @@ fn interpret_atom(atom: &[char]) -> Result<Value, ParserError> {
                                     })?,
                             ))
                         } else {
-                            Ok(Value::Integer(str::parse::<i64>(&char_slice_to_str(chars)).map_err(|err| {
+                            Ok(Value::Integer(
+                                str::parse::<i64>(&char_slice_to_str(chars)).map_err(|err| {
                                     ParserError::BadInt {
                                         parsing: char_slice_to_str(chars),
                                         encountered: err,
                                     }
-                                })?))
+                                })?,
+                            ))
                         }
-                    }
-                    else {
+                    } else {
                         Ok(Value::Symbol(Symbol::from_name(&char_slice_to_str(name))))
                     }
-                },
-                &[namespace, name] => {
+                }
+                [namespace, name] => {
                     if starts_like_number(namespace) {
                         Err(ParserError::InvalidSymbol)
-                    }
-                    else {
+                    } else {
                         Ok(Value::Symbol(Symbol::from_namespace_and_name(
                             &char_slice_to_str(namespace),
-                            &char_slice_to_str(name)
+                            &char_slice_to_str(name),
                         )))
                     }
-                },
+                }
                 _ => Err(ParserError::CannotHaveMoreThanOneSlashInSymbol),
             }
         }
@@ -873,7 +876,7 @@ fn parse_helper<'a, Observer: ParseObserver>(
                     observer.stop_parsing_current();
                     return Ok(ParserSuccess {
                         remaining_input: s,
-                        value: interpret_atom(&built_up)?,
+                        value: interpret_atom(built_up)?,
                     });
                 } else {
                     built_up.push(s[0]);
@@ -2078,7 +2081,7 @@ mod tests {
         assert_eq!(
             Err(ParserError::WithContext {
                 context: vec![Context::ParsingVector(RowCol { row: 2, col: 1 })],
-                row_col: RowCol { row:8, col: 1 },
+                row_col: RowCol { row: 8, col: 1 },
                 error: Box::new(ParserError::InvalidKeyword)
             }),
             parse_str_with_options(
@@ -2151,6 +2154,26 @@ mod tests {
                 }
             )
             .unwrap()
+        )
+    }
+
+    #[test]
+    fn test_parsing_symbols_that_might_be_mistaken_for_numbers() {
+        assert_eq!(
+            parse_str("a1b").unwrap(),
+            Value::Symbol(Symbol::from_name("a1b"))
+        );
+        assert_eq!(
+            parse_str("ab1").unwrap(),
+            Value::Symbol(Symbol::from_name("ab1"))
+        );
+        assert_eq!(
+            parse_str("ab1/c1d").unwrap(),
+            Value::Symbol(Symbol::from_namespace_and_name("ab1", "c1d"))
+        );
+        assert_eq!(
+            parse_str("ab1/cd1").unwrap(),
+            Value::Symbol(Symbol::from_namespace_and_name("ab1", "cd1"))
         )
     }
 }
