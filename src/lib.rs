@@ -1105,9 +1105,6 @@ pub struct ParserOptions {
     /// Whether to return errors with the context of what forms the parser was
     /// parsing and the line numbers where the errors occurred.
     ///
-    /// This is currently done on a "best effort" basis and some errors, like those that arise
-    /// parsing numbers, are currently not eligible for this tracking.
-    ///
     /// Defaults to false.
     pub track_line_numbers: bool,
     /// Whether or not to error if there exists non-whitespace content after
