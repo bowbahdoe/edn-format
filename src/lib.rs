@@ -446,6 +446,8 @@ trait ParseObserver {
 
     fn start_parsing_string(&mut self);
 
+    fn start_parsing_atom(&mut self);
+
     fn stop_parsing_current(&mut self);
 
     fn advance_one_char_from(&mut self, start: &[char]) {
@@ -469,6 +471,8 @@ impl ParseObserver for NoOpParseObserver {
 
     fn start_parsing_string(&mut self) {}
 
+    fn start_parsing_atom(&mut self) {}
+
     fn stop_parsing_current(&mut self) {}
 
     fn advance_n_chars_from(&mut self, _start: &[char], _n: usize) {}
@@ -482,6 +486,7 @@ pub enum Context {
     ParsingMap(RowCol),
     ParsingSet(RowCol),
     ParsingString(RowCol),
+    ParsingAtom(RowCol)
 }
 
 #[derive(Debug)]
@@ -518,6 +523,10 @@ impl ParseObserver for ContextStackerObserver {
 
     fn start_parsing_string(&mut self) {
         self.context.push(Context::ParsingString(self.row_col));
+    }
+
+    fn start_parsing_atom(&mut self) {
+        self.context.push(Context::ParsingAtom(self.row_col));
     }
 
     fn stop_parsing_current(&mut self) {
@@ -717,6 +726,7 @@ fn parse_helper<'a, Observer: ParseObserver>(
                     parser_state = ParserState::SelectingDispatch;
                 } else if is_allowed_atom_character(s[0]) || s[0] == ':' {
                     let built_up = vec![s[0]];
+                    observer.start_parsing_atom();
                     observer.advance_one_char_from(s);
                     s = &s[1..];
                     parser_state = ParserState::ParsingAtom { built_up };
@@ -860,6 +870,7 @@ fn parse_helper<'a, Observer: ParseObserver>(
                 if s.is_empty() && built_up.is_empty() {
                     return Err(ParserError::UnexpectedEndOfInput);
                 } else if s.is_empty() || !is_allowed_atom_character(s[0]) {
+                    observer.stop_parsing_current();
                     return Ok(ParserSuccess {
                         remaining_input: s,
                         value: interpret_atom(&built_up)?,
