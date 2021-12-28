@@ -560,6 +560,26 @@ trait ParseObserver {
     fn advance_one_char(&mut self, c: char);
 }
 
+struct NoOpParseObserver;
+
+impl ParseObserver for NoOpParseObserver {
+    fn start_parsing_vector(&mut self) {}
+
+    fn start_parsing_list(&mut self) {}
+
+    fn start_parsing_map(&mut self) {}
+
+    fn start_parsing_set(&mut self) {}
+
+    fn start_parsing_string(&mut self) {}
+
+    fn start_parsing_atom(&mut self) {}
+
+    fn stop_parsing_current(&mut self) {}
+
+    fn advance_one_char(&mut self, _c: char) {}
+}
+
 /// An element of context about what the parser was doing when an error was detected.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Context {
@@ -1398,8 +1418,7 @@ impl<Iter: Iterator<Item = char>> Iterator for Parser<Iter> {
     type Item = Result<Value, ParserError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut context = ContextStackerObserver::new();
-        match parse_helper(&mut self.iter, ParserState::Begin, &mut context, &self.opts) {
+        match parse_helper(&mut self.iter, ParserState::Begin, &mut NoOpParseObserver, &self.opts) {
             Err(error) => {
                 if error == ParserError::EmptyInput {
                     None

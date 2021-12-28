@@ -9,7 +9,7 @@ The intent is to provide a more complete api than the existing [edn](https://cra
 
 ```
 [dependencies]
-edn-format = "3.0.0"
+edn-format = "3.0.1"
 ```
 
 ## Example usage
