@@ -361,9 +361,6 @@ pub enum ParserError {
     #[error("Cannot have more than one slash in a symbol")]
     CannotHaveMoreThanOneSlashInSymbol,
 
-    #[error("Cannot have a colon in a symbol")]
-    CannotHaveAColonInASymbol,
-
     #[error("Cannot have slash at the beginning of symbol")]
     CannotHaveSlashAtBeginningOfKeyword,
 
@@ -372,9 +369,6 @@ pub enum ParserError {
 
     #[error("Cannot have more than one slash in a symbol")]
     CannotHaveMoreThanOneSlashInKeyword,
-
-    #[error("Cannot have a colon in a symbol")]
-    CannotHaveAColonInAKeyword,
 
     #[error("Only 0 can start with 0")]
     OnlyZeroCanStartWithZero,
@@ -2287,27 +2281,6 @@ mod tests {
     // -------------------------------------------------------------------------
 
     #[test]
-    fn cant_have_colons_in_symbol() {
-        assert_eq!(
-            parse_str("a:b/a").map_err(|err| err.error),
-            Err(ParserError::CannotHaveAColonInASymbol)
-        );
-        assert_eq!(
-            parse_str("a:/a").map_err(|err| err.error),
-            Err(ParserError::CannotHaveAColonInASymbol)
-        );
-
-        assert_eq!(
-            parse_str("ab/:").map_err(|err| err.error),
-            Err(ParserError::CannotHaveAColonInASymbol)
-        );
-    }
-    assert_eq!(
-        parse_str("ab/a:").map_err(|err| err.error),
-        Err(ParserError::CannotHaveAColonInASymbol)
-    );
-
-    #[test]
     fn test_many_values() {
         let mut parser = Parser::from_str("123 456 [] [[]]", ParserOptions::default());
         assert_eq!(
@@ -2320,36 +2293,6 @@ mod tests {
                 None
             ),
             (
-                parser.next(),
-                parser.next(),
-                parser.next(),
-                parser.next(),
-                parser.next(),
-                parser.next()
-            )
-        )
-    }
-
-    #[test]
-    fn test_many_values_with_errors() {
-        let mut parser = Parser::from_str("123 456 [] ::abc [] [[]]", ParserOptions::default());
-        assert_eq!(
-            (
-                Some(Ok(Value::from(123))),
-                Some(Ok(Value::from(456))),
-                Some(Ok(Value::Vector(vec![]))),
-                Some(Err(ParserErrorWithContext {
-                    row: 1,
-                    col: 1,
-                    context: vec![Context::ParsingAtom {row:1, col:1}],
-                    error: ParserError::InvalidKeyword
-                })),
-                Some(Ok(Value::Vector(vec![Value::Vector(vec![])]))),
-                None,
-                None
-            ),
-            (
-                parser.next(),
                 parser.next(),
                 parser.next(),
                 parser.next(),
