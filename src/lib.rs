@@ -361,6 +361,9 @@ pub enum ParserError {
     #[error("Cannot have more than one slash in a symbol")]
     CannotHaveMoreThanOneSlashInSymbol,
 
+    #[error("Cannot have more a colon in a symbol")]
+    CannotHaveColonInSymbol,
+
     #[error("Cannot have slash at the beginning of symbol")]
     CannotHaveSlashAtBeginningOfKeyword,
 
@@ -369,6 +372,9 @@ pub enum ParserError {
 
     #[error("Cannot have more than one slash in a symbol")]
     CannotHaveMoreThanOneSlashInKeyword,
+
+    #[error("Cannot have more a colon in a keyword")]
+    CannotHaveColonInKeyword,
 
     #[error("Only 0 can start with 0")]
     OnlyZeroCanStartWithZero,
@@ -454,6 +460,7 @@ fn is_allowed_atom_character(c: char) -> bool {
         || c == '<'
         || c == '>'
         || c == '/'
+        || c == ':'
         || c.is_alphabetic()
         || c.is_numeric()
 }
@@ -660,97 +667,112 @@ fn interpret_atom(atom: &[char]) -> Result<Value, ParserError> {
         &['/', ..] => Err(ParserError::CannotHaveSlashAtBeginningOfSymbol),
         &[.., '/'] => Err(ParserError::CannotHaveSlashAtEndOfSymbol),
         &[':', ref rest @ ..] => {
-            let split: Vec<_> = rest.split(|c| *c == '/').collect();
-            match split[..] {
-                [name] => Ok(Value::Keyword(Keyword::from_name(&char_slice_to_str(name)))),
-                [namespace, name] => {
-                    if starts_like_number(namespace) {
-                        Err(ParserError::InvalidKeyword)
-                    } else {
-                        Ok(Value::Keyword(Keyword::from_namespace_and_name(
-                            &char_slice_to_str(namespace),
-                            &char_slice_to_str(name),
-                        )))
+            if rest.contains(&':') {
+                Err(ParserError::CannotHaveColonInKeyword)
+            } else {
+                let split: Vec<_> = rest.split(|c| *c == '/').collect();
+                match split[..] {
+                    [name] => Ok(Value::Keyword(Keyword::from_name(&char_slice_to_str(name)))),
+                    [namespace, name] => {
+                        if starts_like_number(namespace) {
+                            Err(ParserError::InvalidKeyword)
+                        } else {
+                            Ok(Value::Keyword(Keyword::from_namespace_and_name(
+                                &char_slice_to_str(namespace),
+                                &char_slice_to_str(name),
+                            )))
+                        }
                     }
+                    _ => Err(ParserError::CannotHaveMoreThanOneSlashInKeyword),
                 }
-                _ => Err(ParserError::CannotHaveMoreThanOneSlashInKeyword),
             }
         }
         chars => {
-            let split: Vec<_> = chars.split(|c| *c == '/').collect();
-            match split[..] {
-                [name] => {
-                    if starts_like_number(name) {
-                        if name.ends_with(&['M']) && name.iter().filter(|c| **c == 'M').count() == 1
-                        {
-                            Ok(Value::BigDec(
-                                str::parse::<BigDecimal>(&char_slice_to_str(
-                                    &chars[..chars.len() - 1],
-                                ))
-                                .map_err(|err| {
-                                    ParserError::BadBigDec {
-                                        parsing: char_slice_to_str(chars),
-                                        encountered: err,
-                                    }
-                                })?,
-                            ))
-                        } else if name.contains(&'.') || name.contains(&'e') || name.contains(&'E')
-                        {
-                            Ok(Value::Float(OrderedFloat(
-                                str::parse::<f64>(&char_slice_to_str(chars)).map_err(|err| {
-                                    ParserError::BadFloat {
-                                        parsing: char_slice_to_str(chars),
-                                        encountered: err,
-                                    }
-                                })?,
-                            )))
-                        } else if name != ['0'] && (name.starts_with(&['0']))
-                            || (name != ['+', '0']
-                                && (name.len() > 1
-                                    && name.starts_with(&['+'])
-                                    && name[1..].starts_with(&['0'])))
-                            || (name != ['-', '0']
-                                && (name.len() > 1
-                                    && name.starts_with(&['-'])
-                                    && name[1..].starts_with(&['0'])))
-                        {
-                            // Only ints are subject to this restriction it seems
-                            Err(ParserError::OnlyZeroCanStartWithZero)
-                        } else if name.ends_with(&['N'])
-                            && name.iter().filter(|c| **c == 'N').count() == 1
-                        {
-                            Ok(Value::BigInt(
-                                str::parse::<BigInt>(&char_slice_to_str(&chars[..chars.len() - 1]))
-                                    .map_err(|err| ParserError::BadBigInt {
-                                        parsing: char_slice_to_str(chars),
-                                        encountered: err,
+            if chars.contains(&':') {
+                Err(ParserError::CannotHaveColonInSymbol)
+            } else {
+                let split: Vec<_> = chars.split(|c| *c == '/').collect();
+                match split[..] {
+                    [name] => {
+                        if starts_like_number(name) {
+                            if name.ends_with(&['M'])
+                                && name.iter().filter(|c| **c == 'M').count() == 1
+                            {
+                                Ok(Value::BigDec(
+                                    str::parse::<BigDecimal>(&char_slice_to_str(
+                                        &chars[..chars.len() - 1],
+                                    ))
+                                    .map_err(|err| {
+                                        ParserError::BadBigDec {
+                                            parsing: char_slice_to_str(chars),
+                                            encountered: err,
+                                        }
                                     })?,
-                            ))
+                                ))
+                            } else if name.contains(&'.')
+                                || name.contains(&'e')
+                                || name.contains(&'E')
+                            {
+                                Ok(Value::Float(OrderedFloat(
+                                    str::parse::<f64>(&char_slice_to_str(chars)).map_err(
+                                        |err| ParserError::BadFloat {
+                                            parsing: char_slice_to_str(chars),
+                                            encountered: err,
+                                        },
+                                    )?,
+                                )))
+                            } else if name != ['0'] && (name.starts_with(&['0']))
+                                || (name != ['+', '0']
+                                    && (name.len() > 1
+                                        && name.starts_with(&['+'])
+                                        && name[1..].starts_with(&['0'])))
+                                || (name != ['-', '0']
+                                    && (name.len() > 1
+                                        && name.starts_with(&['-'])
+                                        && name[1..].starts_with(&['0'])))
+                            {
+                                // Only ints are subject to this restriction it seems
+                                Err(ParserError::OnlyZeroCanStartWithZero)
+                            } else if name.ends_with(&['N'])
+                                && name.iter().filter(|c| **c == 'N').count() == 1
+                            {
+                                Ok(Value::BigInt(
+                                    str::parse::<BigInt>(&char_slice_to_str(
+                                        &chars[..chars.len() - 1],
+                                    ))
+                                    .map_err(|err| {
+                                        ParserError::BadBigInt {
+                                            parsing: char_slice_to_str(chars),
+                                            encountered: err,
+                                        }
+                                    })?,
+                                ))
+                            } else {
+                                Ok(Value::Integer(
+                                    str::parse::<i64>(&char_slice_to_str(chars)).map_err(
+                                        |err| ParserError::BadInt {
+                                            parsing: char_slice_to_str(chars),
+                                            encountered: err,
+                                        },
+                                    )?,
+                                ))
+                            }
                         } else {
-                            Ok(Value::Integer(
-                                str::parse::<i64>(&char_slice_to_str(chars)).map_err(|err| {
-                                    ParserError::BadInt {
-                                        parsing: char_slice_to_str(chars),
-                                        encountered: err,
-                                    }
-                                })?,
-                            ))
+                            Ok(Value::Symbol(Symbol::from_name(&char_slice_to_str(name))))
                         }
-                    } else {
-                        Ok(Value::Symbol(Symbol::from_name(&char_slice_to_str(name))))
                     }
-                }
-                [namespace, name] => {
-                    if starts_like_number(namespace) {
-                        Err(ParserError::InvalidSymbol)
-                    } else {
-                        Ok(Value::Symbol(Symbol::from_namespace_and_name(
-                            &char_slice_to_str(namespace),
-                            &char_slice_to_str(name),
-                        )))
+                    [namespace, name] => {
+                        if starts_like_number(namespace) {
+                            Err(ParserError::InvalidSymbol)
+                        } else {
+                            Ok(Value::Symbol(Symbol::from_namespace_and_name(
+                                &char_slice_to_str(namespace),
+                                &char_slice_to_str(name),
+                            )))
+                        }
                     }
+                    _ => Err(ParserError::CannotHaveMoreThanOneSlashInSymbol),
                 }
-                _ => Err(ParserError::CannotHaveMoreThanOneSlashInSymbol),
             }
         }
     }
@@ -1345,19 +1367,26 @@ pub fn emit_str(value: &Value) -> String {
     format!("{}", value)
 }
 
+/// Parser which can yield multiple forms from a single iterator of
+/// chars
 pub struct Parser<Iter: Iterator<Item = char>> {
     opts: ParserOptions,
     iter: Peekable<Iter>,
 }
 
 impl<'a> Parser<Chars<'a>> {
+    /// Construct a parser from a &str,
     pub fn from_str(s: &'a str, opts: ParserOptions) -> Parser<Chars<'a>> {
-        Parser::from_iterator(s.chars(), opts)
+        Parser {
+            opts,
+            iter: s.chars().peekable(),
+        }
     }
 }
 
 impl<Iter: Iterator<Item = char>> Parser<Iter> {
-    pub fn from_iterator(iter: Iter, opts: ParserOptions) -> Parser<Iter> {
+    /// Construct a parser from an arbitrary iterator,
+    pub fn from_iter(iter: Iter, opts: ParserOptions) -> Parser<Iter> {
         Parser {
             opts,
             iter: iter.peekable(),
@@ -1366,23 +1395,16 @@ impl<Iter: Iterator<Item = char>> Parser<Iter> {
 }
 
 impl<Iter: Iterator<Item = char>> Iterator for Parser<Iter> {
-    type Item = Result<Value, ParserErrorWithContext>;
+    type Item = Result<Value, ParserError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut context = ContextStackerObserver::new();
-        match parse_helper(&mut self.iter, ParserState::Begin, &mut context, &self.opts).map_err(
-            |err| ParserErrorWithContext {
-                context: context.context.clone(),
-                row: context.row_col.row,
-                col: context.row_col.col,
-                error: err,
-            },
-        ) {
-            Err(error_with_context) => {
-                if error_with_context.error == ParserError::EmptyInput {
+        match parse_helper(&mut self.iter, ParserState::Begin, &mut context, &self.opts) {
+            Err(error) => {
+                if error == ParserError::EmptyInput {
                     None
                 } else {
-                    Some(Err(error_with_context))
+                    Some(Err(error))
                 }
             }
             Ok(value) => Some(Ok(value)),
@@ -1393,7 +1415,6 @@ impl<Iter: Iterator<Item = char>> Iterator for Parser<Iter> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Context::ParsingAtom;
     use chrono::DateTime;
     use std::vec;
 
@@ -1677,7 +1698,7 @@ mod tests {
             parse_str(":a/b/c").map_err(|err| err.error)
         );
         assert_eq!(
-            Err(ParserError::InvalidKeyword),
+            Err(ParserError::CannotHaveColonInKeyword),
             parse_str("::namespaced").map_err(|err| err.error)
         );
     }
@@ -2135,7 +2156,7 @@ mod tests {
     #[test]
     fn test_two_colons() {
         assert_eq!(
-            Err(ParserError::InvalidKeyword),
+            Err(ParserError::CannotHaveColonInKeyword),
             parse_str("::").map_err(|err| err.error)
         )
     }
@@ -2144,10 +2165,10 @@ mod tests {
     fn test_row_col_tracking() {
         assert_eq!(
             Err(ParserErrorWithContext {
-                context: vec![ParsingAtom { row: 5, col: 1 }],
-                row: 5,
+                context: vec![Context::ParsingAtom { row: 5, col: 1 }],
+                row: 6,
                 col: 1,
-                error: ParserError::InvalidKeyword
+                error: ParserError::CannotHaveColonInKeyword
             }),
             parse_str("    ::",)
         );
@@ -2162,19 +2183,19 @@ mod tests {
         );
         assert_eq!(
             Err(ParserErrorWithContext {
-                context: vec![ParsingAtom { row: 4, col: 1 }],
-                row: 4,
+                context: vec![Context::ParsingAtom { row: 4, col: 1 }],
+                row: 5,
                 col: 1,
-                error: ParserError::InvalidKeyword
+                error: ParserError::CannotHaveColonInKeyword
             }),
             parse_str("   ::",)
         );
         assert_eq!(
             Err(ParserErrorWithContext {
-                context: vec![ParsingAtom { row: 1, col: 3 }],
-                row: 1,
+                context: vec![Context::ParsingAtom { row: 1, col: 3 }],
+                row: 2,
                 col: 3,
-                error: ParserError::InvalidKeyword
+                error: ParserError::CannotHaveColonInKeyword
             }),
             parse_str("   \n\n::",)
         );
@@ -2186,11 +2207,11 @@ mod tests {
             Err(ParserErrorWithContext {
                 context: vec![
                     Context::ParsingVector { row: 2, col: 1 },
-                    ParsingAtom { row: 8, col: 1 }
+                    Context::ParsingAtom { row: 8, col: 1 }
                 ],
-                row: 8,
+                row: 10,
                 col: 1,
-                error: ParserError::InvalidKeyword
+                error: ParserError::CannotHaveColonInKeyword
             }),
             parse_str(" [ 1 2 ::a]",)
         );
@@ -2204,9 +2225,9 @@ mod tests {
                     Context::ParsingVector { row: 3, col: 3 },
                     Context::ParsingAtom { row: 3, col: 5 }
                 ],
-                row: 3,
+                row: 5,
                 col: 5,
-                error: ParserError::InvalidKeyword
+                error: ParserError::CannotHaveColonInKeyword
             }),
             parse_str(" ( a b c \n#{ \n{ [ \n1 2 4\n  ::a  \n3]  3} } )",)
         );
@@ -2415,6 +2436,34 @@ mod tests {
     }
 
     #[test]
+    fn test_symbols_with_colons() {
+        assert_eq!(
+            parse_str("a:").map_err(|err| err.error),
+            Err(ParserError::CannotHaveColonInSymbol)
+        );
+        assert_eq!(
+            parse_str("a:b").map_err(|err| err.error),
+            Err(ParserError::CannotHaveColonInSymbol)
+        );
+        assert_eq!(
+            parse_str("a:b/c").map_err(|err| err.error),
+            Err(ParserError::CannotHaveColonInSymbol)
+        );
+        assert_eq!(
+            parse_str("ab/c:").map_err(|err| err.error),
+            Err(ParserError::CannotHaveColonInSymbol)
+        );
+        assert_eq!(
+            parse_str("ab/c:d").map_err(|err| err.error),
+            Err(ParserError::CannotHaveColonInSymbol)
+        );
+        assert_eq!(
+            parse_str("ab/c: ").map_err(|err| err.error),
+            Err(ParserError::CannotHaveColonInSymbol)
+        );
+    }
+
+    #[test]
     fn test_many_values() {
         let mut parser = Parser::from_str("123 456 [] [[]]", ParserOptions::default());
         assert_eq!(
@@ -2435,5 +2484,60 @@ mod tests {
                 parser.next()
             )
         )
+    }
+
+    #[test]
+    fn test_many_values_with_errors() {
+        let mut parser = Parser::from_str("123 456 :: [] :: [[]]", ParserOptions::default());
+        assert_eq!(
+            (
+                Some(Ok(Value::from(123))),
+                Some(Ok(Value::from(456))),
+                Some(Err(ParserError::CannotHaveColonInKeyword)),
+                Some(Ok(Value::Vector(vec![]))),
+                Some(Err(ParserError::CannotHaveColonInKeyword)),
+                Some(Ok(Value::Vector(vec![Value::Vector(vec![])]))),
+                None,
+                None
+            ),
+            (
+                parser.next(),
+                parser.next(),
+                parser.next(),
+                parser.next(),
+                parser.next(),
+                parser.next(),
+                parser.next(),
+                parser.next()
+            )
+        );
+    }
+
+    #[test]
+    fn test_many_values_with_errors_iter() {
+        let mut parser =
+            Parser::from_iter("123 456 :: [] :: [[]]".chars(), ParserOptions::default());
+        assert_eq!(
+            (
+                Some(Ok(Value::from(123))),
+                Some(Ok(Value::from(456))),
+                Some(Err(ParserError::CannotHaveColonInKeyword)),
+                Some(Ok(Value::Vector(vec![]))),
+                Some(Err(ParserError::CannotHaveColonInKeyword)),
+                Some(Ok(Value::Vector(vec![Value::Vector(vec![])]))),
+                None,
+                None
+            ),
+            (
+                parser.next(),
+                parser.next(),
+                parser.next(),
+                parser.next(),
+                parser.next(),
+                parser.next(),
+                parser.next(),
+                parser.next()
+            )
+        );
     }
 }

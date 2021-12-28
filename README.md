@@ -9,7 +9,7 @@ The intent is to provide a more complete api than the existing [edn](https://cra
 
 ```
 [dependencies]
-edn-format = "2.0.0"
+edn-format = "3.0.0"
 ```
 
 ## Example usage
@@ -137,4 +137,19 @@ fn example() {
     println!("{:?}", deserialized)
     // Ok(Ok(Person { name: "bob", age: 23, hobbies: ["card games", "motorcycles"] }))
 }
+```
+
+### Parse iterator of data
+```rust 
+use edn_format::{Parser, ParserOptions};
+
+let parser = Parser::from_iter("123 456 [] [[]]".chars(), ParserOptions::default());
+for element in parser {
+    println!("{}", element.expect("expected valid element"));
+}
+
+// 123
+// 456
+// []
+// [[]]
 ```
