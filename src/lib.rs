@@ -7,7 +7,7 @@ use ordered_float::OrderedFloat;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fmt::{Display, Formatter};
-use std::iter::FromIterator;
+use std::iter::{FromIterator, Peekable};
 use std::num::{ParseFloatError, ParseIntError};
 use thiserror::Error;
 use uuid::Uuid;
@@ -398,8 +398,7 @@ pub enum ParserError {
 
     #[error("Unexpected Extra Input")]
     ExtraInput {
-        parsed_value: Value,
-        extra_input: Vec<char>,
+        parsed_value: Value
     },
 
     #[error("Error with context")]
@@ -408,11 +407,6 @@ pub enum ParserError {
         row_col: RowCol,
         error: Box<ParserError>,
     },
-}
-
-struct ParserSuccess<'a> {
-    remaining_input: &'a [char],
-    value: Value,
 }
 
 #[derive(Debug)]
@@ -529,11 +523,7 @@ trait ParseObserver {
 
     fn stop_parsing_current(&mut self);
 
-    fn advance_one_char_from(&mut self, start: &[char]) {
-        self.advance_n_chars_from(start, 1);
-    }
-
-    fn advance_n_chars_from(&mut self, start: &[char], n: usize);
+    fn advance_one_char(&mut self, start: char);
 }
 
 /// No op observer, for when we want to call the parser recursively consequence free.
@@ -554,7 +544,7 @@ impl ParseObserver for NoOpParseObserver {
 
     fn stop_parsing_current(&mut self) {}
 
-    fn advance_n_chars_from(&mut self, _start: &[char], _n: usize) {}
+    fn advance_one_char(&mut self, _start: char) {}
 }
 
 /// An element of context about what the parser was doing when an error was detected.
@@ -612,16 +602,12 @@ impl ParseObserver for ContextStackerObserver {
         self.context.pop();
     }
 
-    fn advance_n_chars_from(&mut self, start: &[char], n: usize) {
-        let mut i = 0;
-        while i < start.len() && i < n {
-            if start[i] == '\n' {
-                self.row_col.row = 0;
-                self.row_col.col += 1;
-            } else {
-                self.row_col.row += 1;
-            }
-            i += 1;
+    fn advance_one_char(&mut self, start: char) {
+        if start == '\n' {
+            self.row_col.row = 0;
+            self.row_col.col += 1;
+        } else {
+            self.row_col.row += 1;
         }
     }
 }
@@ -743,102 +729,95 @@ fn interpret_atom(atom: &[char]) -> Result<Value, ParserError> {
 }
 
 /// Likely suboptimal parsing. Focus for now is just on getting correct results.
-fn parse_helper<'a, Observer: ParseObserver>(
-    mut s: &'a [char],
+fn parse_helper<'a, Observer: ParseObserver, Iter: Iterator<Item=char>>(
+    s: &mut Peekable<Iter>,
     mut parser_state: ParserState,
     observer: &mut Observer,
     opts: &ParserOptions,
-) -> Result<ParserSuccess<'a>, ParserError> {
+) -> Result<Value, ParserError> {
     'parsing: loop {
         // Strip out comments
         match parser_state {
             ParserState::ParsingString { .. } => {}
             _ => {
-                if !s.is_empty() && s[0] == ';' {
-                    while !s.is_empty() && s[0] != '\n' {
-                        observer.advance_one_char_from(s);
-                        s = &s[1..];
+                if let Some(';') = s.peek() {
+                    loop {
+                        match s.next() {
+                            Some('\n') | None => {
+                                observer.advance_one_char('\n');
+                                break;
+                            }
+                            Some(c) => {
+                                observer.advance_one_char(c);
+                            }
+                        }
                     }
                 }
             }
         };
         match &mut parser_state {
             ParserState::Begin => {
-                if s.is_empty() {
-                    return Err(ParserError::EmptyInput);
-                } else if is_whitespace(s[0]) {
-                    observer.advance_one_char_from(s);
-                    s = &s[1..];
-                    parser_state = ParserState::Begin;
-                } else if s[0] == '(' {
-                    observer.advance_one_char_from(s);
-                    observer.start_parsing_list();
-                    s = &s[1..];
-                    parser_state = ParserState::ParsingList {
-                        values_so_far: vec![],
-                    };
-                } else if s[0] == '[' {
-                    observer.advance_one_char_from(s);
-                    observer.start_parsing_vector();
-                    s = &s[1..];
-                    parser_state = ParserState::ParsingVector {
-                        values_so_far: vec![],
-                    };
-                } else if s[0] == '{' {
-                    observer.advance_one_char_from(s);
-                    observer.start_parsing_map();
-                    s = &s[1..];
-                    parser_state = ParserState::ParsingMap {
-                        values_so_far: vec![],
-                    };
-                } else if s[0] == '"' {
-                    observer.advance_one_char_from(s);
-                    observer.start_parsing_string();
-                    s = &s[1..];
-                    parser_state = ParserState::ParsingString {
-                        built_up: "".to_string(),
-                    };
-                } else if s[0] == '\\' {
-                    observer.advance_one_char_from(s);
-                    s = &s[1..];
-                    parser_state = ParserState::ParsingCharacter;
-                } else if s[0] == '#' {
-                    observer.advance_one_char_from(s);
-                    s = &s[1..];
-                    parser_state = ParserState::SelectingDispatch;
-                } else if is_allowed_atom_character(s[0]) || s[0] == ':' {
-                    let built_up = vec![s[0]];
-                    observer.start_parsing_atom();
-                    observer.advance_one_char_from(s);
-                    s = &s[1..];
-                    parser_state = ParserState::ParsingAtom { built_up };
-                } else {
-                    return Err(ParserError::UnexpectedCharacter(s[0]));
+                match s.next() {
+                    None => return Err(ParserError::EmptyInput),
+                    Some(c) => {
+                        observer.advance_one_char(c);
+                        if is_whitespace(c) {
+                            parser_state = ParserState::Begin;
+                        } else if c == '(' {
+                            observer.start_parsing_list();
+                            parser_state = ParserState::ParsingList {
+                                values_so_far: vec![],
+                            };
+                        } else if c == '[' {
+                            observer.start_parsing_vector();
+                            parser_state = ParserState::ParsingVector {
+                                values_so_far: vec![],
+                            };
+                        } else if c == '{' {
+                            observer.start_parsing_map();
+                            parser_state = ParserState::ParsingMap {
+                                values_so_far: vec![],
+                            };
+                        } else if c == '"' {
+                            observer.start_parsing_string();
+                            parser_state = ParserState::ParsingString {
+                                built_up: "".to_string(),
+                            };
+                        } else if c == '\\' {
+                            parser_state = ParserState::ParsingCharacter;
+                        } else if c == '#' {
+                            parser_state = ParserState::SelectingDispatch;
+                        } else if is_allowed_atom_character(c) || c == ':' {
+                            let built_up = vec![c];
+                            observer.start_parsing_atom();
+                            parser_state = ParserState::ParsingAtom { built_up };
+                        } else {
+                            return Err(ParserError::UnexpectedCharacter(c));
+                        }
+                    }
                 }
             }
 
             ParserState::ParsingList {
                 ref mut values_so_far,
             } => {
-                if s.is_empty() {
-                    return Err(ParserError::UnexpectedEndOfInput);
-                } else if is_whitespace(s[0]) {
-                    observer.advance_one_char_from(s);
-                    s = &s[1..];
-                } else if s[0] == ')' {
-                    observer.stop_parsing_current();
-                    observer.advance_one_char_from(s);
-                    return Ok(ParserSuccess {
-                        remaining_input: &s[1..],
-                        value: Value::List(values_so_far.clone()),
-                    });
-                } else {
-                    let ParserSuccess {
-                        remaining_input,
-                        value,
-                    } = parse_helper(s, ParserState::Begin, observer, opts)?;
-                    values_so_far.push(value);
-                    s = remaining_input;
+                let next = s.peek();
+                match next {
+                    None => return Err(ParserError::UnexpectedEndOfInput),
+                    Some(c) => {
+                        if is_whitespace(*c) {
+                            observer.advance_one_char(*c);
+                            s.next();
+                        } else if *c == ')' {
+                            observer.advance_one_char(*c);
+                            s.next();
+                            observer.stop_parsing_current();
+                            return Ok(Value::List(values_so_far.clone()));
+                        } else {
+                            let value = parse_helper(s, ParserState::Begin, observer, opts)?;
+                            values_so_far.push(value);
+                        }
+                    }
                 }
             }
 
@@ -846,324 +825,322 @@ fn parse_helper<'a, Observer: ParseObserver>(
             ParserState::ParsingVector {
                 ref mut values_so_far,
             } => {
-                if s.is_empty() {
-                    return Err(ParserError::UnexpectedEndOfInput);
-                } else if is_whitespace(s[0]) {
-                    observer.advance_one_char_from(s);
-                    s = &s[1..];
-                } else if s[0] == ']' {
-                    observer.stop_parsing_current();
-                    observer.advance_one_char_from(s);
-                    return Ok(ParserSuccess {
-                        remaining_input: &s[1..],
-                        value: Value::Vector(values_so_far.clone()),
-                    });
-                } else {
-                    let ParserSuccess {
-                        remaining_input,
-                        value,
-                    } = parse_helper(s, ParserState::Begin, observer, opts)?;
-                    values_so_far.push(value);
-                    s = remaining_input;
+                match s.peek() {
+                    None => {
+                        return Err(ParserError::UnexpectedEndOfInput);
+                    }
+                    Some(c) => {
+                        if is_whitespace(*c) {
+                            observer.advance_one_char(*c);
+                            s.next();
+                        } else if *c == ']' {
+                            observer.stop_parsing_current();
+                            observer.advance_one_char(*c);
+                            s.next();
+                            return Ok(Value::Vector(values_so_far.clone()));
+                        } else {
+                            let value = parse_helper(s, ParserState::Begin, observer, opts)?;
+                            values_so_far.push(value);
+                        }
+                    }
                 }
             }
 
             ParserState::ParsingMap {
                 ref mut values_so_far,
             } => {
-                if s.is_empty() {
-                    return Err(ParserError::UnexpectedEndOfInput);
-                } else if is_whitespace(s[0]) {
-                    observer.advance_one_char_from(s);
-                    s = &s[1..];
-                } else if s[0] == '}' {
-                    if values_so_far.len() % 2 != 0 {
-                        return Err(ParserError::OddNumberOfMapElements);
-                    } else {
-                        // I'm confident there has to be a better way to do this
-                        let entries: Vec<(Value, Value)> = values_so_far
-                            .iter_mut()
-                            .map(|v| v.clone())
-                            .batching(|it| match it.next() {
-                                None => None,
-                                Some(x) => it.next().map(|y| (x, y)),
-                            })
-                            .collect();
-
-                        let mut seen = BTreeSet::new();
-                        for (k, _) in entries.iter() {
-                            if seen.contains(k) {
-                                return Err(ParserError::DuplicateKeyInMap { value: k.clone() });
-                            }
-                            seen.insert(k);
-                        }
-                        let value = Value::Map(BTreeMap::from_iter(entries));
-
-                        observer.stop_parsing_current();
-                        observer.advance_one_char_from(s);
-                        return Ok(ParserSuccess {
-                            remaining_input: &s[1..],
-                            value,
-                        });
+                match s.peek() {
+                    None => {
+                        return Err(ParserError::UnexpectedEndOfInput);
                     }
-                } else {
-                    let ParserSuccess {
-                        remaining_input,
-                        value,
-                    } = parse_helper(s, ParserState::Begin, observer, opts)?;
-                    values_so_far.push(value);
-                    s = remaining_input;
+                    Some(c) => {
+                        if is_whitespace(*c) {
+                            observer.advance_one_char(*c);
+                            s.next();
+                        } else if *c == '}' {
+                            if values_so_far.len() % 2 != 0 {
+                                return Err(ParserError::OddNumberOfMapElements);
+                            } else {
+                                // I'm confident there has to be a better way to do this
+                                let entries: Vec<(Value, Value)> = values_so_far
+                                    .iter_mut()
+                                    .map(|v| v.clone())
+                                    .batching(|it| match it.next() {
+                                        None => None,
+                                        Some(x) => it.next().map(|y| (x, y)),
+                                    })
+                                    .collect();
+
+                                let mut seen = BTreeSet::new();
+                                for (k, _) in entries.iter() {
+                                    if seen.contains(k) {
+                                        return Err(ParserError::DuplicateKeyInMap { value: k.clone() });
+                                    }
+                                    seen.insert(k);
+                                }
+                                let value = Value::Map(BTreeMap::from_iter(entries));
+
+                                observer.stop_parsing_current();
+                                observer.advance_one_char(*c);
+                                s.next();
+                                return Ok(value);
+                            }
+                        } else {
+                            let value = parse_helper(s, ParserState::Begin, observer, opts)?;
+                            values_so_far.push(value);
+                        }
+                    }
                 }
             }
 
             ParserState::ParsingSet {
                 ref mut values_so_far,
             } => {
-                if s.is_empty() {
-                    return Err(ParserError::UnexpectedEndOfInput);
-                } else if is_whitespace(s[0]) {
-                    observer.advance_one_char_from(s);
-                    s = &s[1..];
-                } else if s[0] == '}' {
-                    let mut seen = BTreeSet::new();
-                    for v in values_so_far.iter() {
-                        if seen.contains(v) {
-                            return Err(ParserError::DuplicateValueInSet { value: v.clone() });
-                        }
-                        seen.insert(v);
+                match s.peek() {
+                    None => {
+                        return Err(ParserError::UnexpectedEndOfInput);
                     }
-                    observer.stop_parsing_current();
-                    observer.advance_one_char_from(s);
-                    return Ok(ParserSuccess {
-                        remaining_input: &s[1..],
-                        value: Value::Set(values_so_far.iter().cloned().collect()),
-                    });
-                } else {
-                    let ParserSuccess {
-                        remaining_input,
-                        value,
-                    } = parse_helper(s, ParserState::Begin, observer, opts)?;
-                    values_so_far.push(value);
-                    s = remaining_input;
+                    Some(c) => {
+                        if is_whitespace(*c) {
+                            observer.advance_one_char(*c);
+                            s.next();
+                        } else if *c == '}' {
+                            let mut seen = BTreeSet::new();
+                            for v in values_so_far.iter() {
+                                if seen.contains(v) {
+                                    return Err(ParserError::DuplicateValueInSet { value: v.clone() });
+                                }
+                                seen.insert(v);
+                            }
+                            observer.stop_parsing_current();
+                            observer.advance_one_char(*c);
+                            s.next();
+                            return Ok(Value::Set(values_so_far.iter().cloned().collect()));
+                        } else {
+                            let value = parse_helper(s, ParserState::Begin, observer, opts)?;
+                            values_so_far.push(value);
+                        }
+                    }
                 }
             }
 
             ParserState::ParsingAtom { ref mut built_up } => {
-                if s.is_empty() && built_up.is_empty() {
-                    return Err(ParserError::UnexpectedEndOfInput);
-                } else if s.is_empty() || !is_allowed_atom_character(s[0]) {
-                    observer.stop_parsing_current();
-                    return Ok(ParserSuccess {
-                        remaining_input: s,
-                        value: interpret_atom(built_up)?,
-                    });
-                } else {
-                    built_up.push(s[0]);
-                    observer.advance_one_char_from(s);
-                    s = &s[1..];
+                match s.peek() {
+                    None => {
+                        return if built_up.is_empty() {
+                            Err(ParserError::UnexpectedEndOfInput)
+                        } else {
+                            // TODO: Shift this stop call to after successful interpretation
+                            observer.stop_parsing_current();
+                            Ok(interpret_atom(built_up)?)
+                        }
+                    }
+                    Some(c) => {
+                        if !is_allowed_atom_character(*c) {
+                            observer.stop_parsing_current();
+                            return Ok(interpret_atom(built_up)?);
+                        }
+                        else {
+                            built_up.push(*c);
+                            observer.advance_one_char(*c);
+                            s.next();
+                        }
+                    }
                 }
             }
 
             ParserState::ParsingString { ref mut built_up } => {
-                if s.is_empty() {
-                    return Err(ParserError::UnexpectedEndOfInput);
-                } else if s[0] == '"' {
-                    observer.stop_parsing_current();
-                    observer.advance_one_char_from(s);
-                    return Ok(ParserSuccess {
-                        remaining_input: &s[1..],
-                        value: Value::String(built_up.clone()),
-                    });
-                } else if s[0] == '\\' {
-                    if s.is_empty() {
-                        return Err(ParserError::InvalidStringEscape);
-                    } else {
-                        match s[1] {
-                            't' => built_up.push('\t'),
-                            'r' => built_up.push('\r'),
-                            'n' => built_up.push('\n'),
+                match s.peek() {
+                    None => return Err(ParserError::UnexpectedEndOfInput),
+                    Some(c) => {
+                        if *c == '"' {
+                            observer.stop_parsing_current();
+                            observer.advance_one_char(*c);
+                            s.next();
+                            return Ok(Value::String(built_up.clone()));
+                        } else if *c == '\\' {
+                            observer.advance_one_char(*c);
+                            s.next();
+                            match s.next() {
+                                None => return Err(ParserError::InvalidStringEscape),
+                                Some(c) => {
+                                    observer.advance_one_char(c);
+                                    match c {
+                                        't' => built_up.push('\t'),
+                                        'r' => built_up.push('\r'),
+                                        'n' => built_up.push('\n'),
 
-                            '\\' => built_up.push('\\'),
-                            '"' => built_up.push('"'),
-                            'u' => {
-                                if s.len() >= 5 {
-                                    let str: String = s[2..6].iter().copied().collect();
-                                    let unicode = u32::from_str_radix(&str, 16)
-                                        .map_err(|_| ParserError::InvalidStringEscape)?;
-                                    match char::from_u32(unicode) {
-                                        None => return Err(ParserError::InvalidStringEscape),
-                                        Some(c) => built_up.push(c),
+                                        '\\' => built_up.push('\\'),
+                                        '"' => built_up.push('"'),
+                                        'u' => {
+                                            match (s.next(), s.next(), s.next(), s.next()) {
+                                                (Some(c1), Some(c2), Some(c3), Some(c4)) => {
+                                                    observer.advance_one_char(c1);
+                                                    observer.advance_one_char(c2);
+                                                    observer.advance_one_char(c3);
+                                                    observer.advance_one_char(c4);
+                                                    let str: String = [c1, c2, c3, c4].iter().copied().collect();
+                                                    let unicode = u32::from_str_radix(&str, 16)
+                                                        .map_err(|_| ParserError::InvalidStringEscape)?;
+                                                    match char::from_u32(unicode) {
+                                                        None => return Err(ParserError::InvalidStringEscape),
+                                                        Some(c) => built_up.push(c),
+                                                    }
+                                                    continue 'parsing;
+                                                }
+                                                (Some(c1), Some(c2), Some(c3), _) => {
+                                                    observer.advance_one_char(c1);
+                                                    observer.advance_one_char(c2);
+                                                    observer.advance_one_char(c3);
+                                                    return Err(ParserError::InvalidStringEscape);
+                                                }
+                                                (Some(c1), Some(c2), _, _) => {
+                                                    observer.advance_one_char(c1);
+                                                    observer.advance_one_char(c2);
+                                                    return Err(ParserError::InvalidStringEscape);
+                                                }
+                                                (Some(c1), _, _, _) => {
+                                                    observer.advance_one_char(c1);
+                                                    return Err(ParserError::InvalidStringEscape);
+                                                }
+                                                _ => {
+                                                    return Err(ParserError::InvalidStringEscape);
+                                                }
+                                            }
+                                        }
+                                        _ => return Err(ParserError::InvalidStringEscape),
                                     }
-                                    observer.advance_n_chars_from(s, 5);
-                                    s = &s[6..];
-                                    continue 'parsing;
-                                } else {
-                                    return Err(ParserError::InvalidStringEscape);
                                 }
                             }
-                            _ => return Err(ParserError::InvalidStringEscape),
+                        } else {
+                            built_up.push(*c);
+                            observer.advance_one_char(*c);
+                            s.next();
                         }
-                        observer.advance_n_chars_from(s, 2);
-                        s = &s[2..];
                     }
-                } else {
-                    built_up.push(s[0]);
-                    observer.advance_one_char_from(s);
-                    s = &s[1..];
                 }
             }
             ParserState::SelectingDispatch => {
-                if s.is_empty() {
-                    return Err(ParserError::UnexpectedEndOfInput);
-                } else if s[0] == '_' {
-                    // Drop the next form. Still error if that form is malformed
-                    observer.advance_one_char_from(s);
-                    let ParserSuccess {
-                        remaining_input, ..
-                    } = parse_helper(&s[1..], ParserState::Begin, observer, opts)?;
-                    s = remaining_input;
-                } else if s[0] == '{' {
-                    observer.advance_one_char_from(s);
-                    s = &s[1..];
-                    observer.start_parsing_set();
-                    parser_state = ParserState::ParsingSet {
-                        values_so_far: vec![],
-                    };
-                } else {
-                    // We expect to read a symbol next and we will associate that symbol as the tag of
-                    // the following element
-                    let ParserSuccess {
-                        remaining_input,
-                        value,
-                    } = parse_helper(s, ParserState::Begin, observer, opts)?;
-                    match value {
-                        Value::Symbol(symbol) => {
-                            let next_success =
-                                parse_helper(remaining_input, ParserState::Begin, observer, opts)?;
+                match s.peek() {
+                    None => {
+                        return Err(ParserError::UnexpectedEndOfInput);
+                    }
+                    Some(c) => {
+                        if *c == '_' {
+                            // Drop the next form. Still error if that form is malformed
+                            observer.advance_one_char(*c);
+                            s.next();
+                            let _ = parse_helper(s, ParserState::Begin, observer, opts)?;
+                        } else if *c == '{' {
+                            observer.advance_one_char(*c);
+                            s.next();
+                            observer.start_parsing_set();
+                            parser_state = ParserState::ParsingSet {
+                                values_so_far: vec![],
+                            };
+                        } else {
+                            // We expect to read a symbol next and we will associate that symbol as the tag of
+                            // the following element
+                            let value = parse_helper(s, ParserState::Begin, observer, opts)?;
+                            match value {
+                                Value::Symbol(symbol) => {
+                                    let next_success =
+                                        parse_helper(s, ParserState::Begin, observer, opts)?;
 
-                            // Handle builtin #inst
-                            if symbol.namespace == None && symbol.name == "inst" {
-                                if let Value::String(timestamp) = next_success.value {
-                                    let datetime = chrono::DateTime::parse_from_rfc3339(&timestamp)
-                                        .map_err(|parse_error| {
-                                            ParserError::InvalidInst(Some(parse_error))
-                                        })?;
-                                    return Ok(ParserSuccess {
-                                        remaining_input: next_success.remaining_input,
-                                        value: Value::Inst(datetime),
-                                    });
-                                } else {
-                                    return Err(ParserError::InvalidInst(None));
-                                }
-                            }
-                            // Handle builtin #uuid
-                            else if symbol.namespace == None && symbol.name == "uuid" {
-                                if let Value::String(uuid_str) = next_success.value {
-                                    let uuid =
-                                        Uuid::parse_str(&uuid_str).map_err(|parse_error| {
-                                            ParserError::InvalidUuid(Some(parse_error))
-                                        })?;
-                                    return Ok(ParserSuccess {
-                                        remaining_input: next_success.remaining_input,
-                                        value: Value::Uuid(uuid),
-                                    });
-                                } else {
-                                    return Err(ParserError::InvalidUuid(None));
-                                }
-                            }
-                            // Everything else becomes a generic TaggedElement
-                            else {
-                                return Ok(ParserSuccess {
-                                    remaining_input: next_success.remaining_input,
-                                    value: Value::TaggedElement(
-                                        symbol,
-                                        Box::new(next_success.value),
-                                    ),
-                                });
-                            }
-                        }
-                        Value::Keyword(ref ns) => {
-                            if !opts.allow_namespaced_map_syntax || ns.namespace.is_some() {
-                                return Err(ParserError::InvalidElementForTag { value });
-                            } else {
-                                let next_success = parse_helper(
-                                    remaining_input,
-                                    ParserState::Begin,
-                                    observer,
-                                    opts,
-                                )?;
-                                if let Value::Map(following_map) = next_success.value {
-                                    let mut new_map = BTreeMap::new();
-                                    for (k, v) in following_map.into_iter() {
-                                        new_map.insert(
-                                            match &k {
-                                                Value::Keyword(keyword) => {
-                                                    if keyword.namespace.is_some() {
-                                                        k
-                                                    } else {
-                                                        Value::Keyword(
-                                                            Keyword::from_namespace_and_name(
-                                                                &ns.name,
-                                                                &keyword.name,
-                                                            ),
-                                                        )
-                                                    }
-                                                }
-                                                _ => k,
-                                            },
-                                            v,
-                                        );
+                                    // Handle builtin #inst
+                                    if symbol.namespace == None && symbol.name == "inst" {
+                                        if let Value::String(timestamp) = next_success {
+                                            let datetime = chrono::DateTime::parse_from_rfc3339(&timestamp)
+                                                .map_err(|parse_error| {
+                                                    ParserError::InvalidInst(Some(parse_error))
+                                                })?;
+                                            return Ok(Value::Inst(datetime));
+                                        } else {
+                                            return Err(ParserError::InvalidInst(None));
+                                        }
                                     }
-                                    return Ok(ParserSuccess {
-                                        remaining_input: next_success.remaining_input,
-                                        value: Value::Map(new_map),
-                                    });
-                                } else {
-                                    return Err(ParserError::NamespacedMapTagNeedsMap {
-                                        namespace: ns.name.to_string(),
-                                        got_instead_of_map: value.clone(),
-                                    });
+                                    // Handle builtin #uuid
+                                    else if symbol.namespace == None && symbol.name == "uuid" {
+                                        if let Value::String(uuid_str) = next_success {
+                                            let uuid =
+                                                Uuid::parse_str(&uuid_str).map_err(|parse_error| {
+                                                    ParserError::InvalidUuid(Some(parse_error))
+                                                })?;
+                                            return Ok(Value::Uuid(uuid));
+                                        } else {
+                                            return Err(ParserError::InvalidUuid(None));
+                                        }
+                                    }
+                                    // Everything else becomes a generic TaggedElement
+                                    else {
+                                        return Ok(Value::TaggedElement(
+                                                symbol,
+                                                Box::new(next_success),
+                                            ));
+                                    }
                                 }
+                                Value::Keyword(ref ns) => {
+                                    if !opts.allow_namespaced_map_syntax || ns.namespace.is_some() {
+                                        return Err(ParserError::InvalidElementForTag { value });
+                                    } else {
+                                        let next_success = parse_helper(
+                                            s,
+                                            ParserState::Begin,
+                                            observer,
+                                            opts,
+                                        )?;
+                                        if let Value::Map(following_map) = next_success {
+                                            let mut new_map = BTreeMap::new();
+                                            for (k, v) in following_map.into_iter() {
+                                                new_map.insert(
+                                                    match &k {
+                                                        Value::Keyword(keyword) => {
+                                                            if keyword.namespace.is_some() {
+                                                                k
+                                                            } else {
+                                                                Value::Keyword(
+                                                                    Keyword::from_namespace_and_name(
+                                                                        &ns.name,
+                                                                        &keyword.name,
+                                                                    ),
+                                                                )
+                                                            }
+                                                        }
+                                                        _ => k,
+                                                    },
+                                                    v,
+                                                );
+                                            }
+                                            return Ok(Value::Map(new_map));
+                                        } else {
+                                            return Err(ParserError::NamespacedMapTagNeedsMap {
+                                                namespace: ns.name.to_string(),
+                                                got_instead_of_map: value.clone(),
+                                            });
+                                        }
+                                    }
+                                }
+                                _ => return Err(ParserError::InvalidElementForTag { value }),
                             }
                         }
-                        _ => return Err(ParserError::InvalidElementForTag { value }),
                     }
                 }
             }
 
             ParserState::ParsingCharacter => {
-                let ParserSuccess {
-                    remaining_input,
-                    value,
-                } = parse_helper(s, ParserState::Begin, observer, opts)?;
-
+                let value = parse_helper(s, ParserState::Begin, observer, opts)?;
                 return if let Value::Symbol(symbol) = value {
                     if symbol.namespace == None {
                         if symbol.name.len() == 1 {
-                            Ok(ParserSuccess {
-                                remaining_input,
-                                value: Value::Character(symbol.name.chars().next().expect(
-                                    "Asserted that this string has at least one character.",
-                                )),
-                            })
+                            Ok(Value::Character(symbol.name.chars().next().expect(
+                                "Asserted that this string has at least one character.",
+                            )))
                         } else {
                             match symbol.name.as_str() {
-                                "newline" => Ok(ParserSuccess {
-                                    remaining_input,
-                                    value: Value::Character('\n'),
-                                }),
-                                "return" => Ok(ParserSuccess {
-                                    remaining_input,
-                                    value: Value::Character('\r'),
-                                }),
-                                "space" => Ok(ParserSuccess {
-                                    remaining_input,
-                                    value: Value::Character(' '),
-                                }),
-                                "tab" => Ok(ParserSuccess {
-                                    remaining_input,
-                                    value: Value::Character('\t'),
-                                }),
+                                "newline" => Ok( Value::Character('\n')),
+                                "return" => Ok( Value::Character('\r')),
+                                "space" => Ok(Value::Character(' ')),
+                                "tab" => Ok(Value::Character('\t')),
                                 _ => Err(ParserError::InvalidCharacterSpecification),
                             }
                         }
@@ -1210,13 +1187,10 @@ impl Default for ParserOptions {
 
 /// Parse EDN from the given input string with the given options.
 pub fn parse_str_with_options(s: &str, opts: ParserOptions) -> Result<Value, ParserError> {
-    let chars: Vec<char> = s.chars().collect();
+    let mut chars = s.chars().peekable();
     if opts.track_line_numbers {
         let mut context = ContextStackerObserver::new();
-        let ParserSuccess {
-            remaining_input,
-            value,
-        } = parse_helper(&chars, ParserState::Begin, &mut context, &opts).map_err(|err| {
+        let value = parse_helper(&mut chars, ParserState::Begin, &mut context, &opts).map_err(|err| {
             ParserError::WithContext {
                 context: context.context.clone(),
                 row_col: context.row_col,
@@ -1224,35 +1198,39 @@ pub fn parse_str_with_options(s: &str, opts: ParserOptions) -> Result<Value, Par
             }
         })?;
         if !opts.allow_extra_input {
-            for c in remaining_input {
-                if !is_whitespace(*c) {
-                    return Err(ParserError::WithContext {
-                        context: context.context.clone(),
-                        row_col: context.row_col,
-                        error: Box::new(ParserError::ExtraInput {
-                            parsed_value: value,
-                            extra_input: remaining_input.to_vec(),
-                        }),
-                    });
+            loop {
+                match chars.next() {
+                    None => { break; }
+                    Some(c) => {
+                        if !is_whitespace(c) {
+                            return Err(ParserError::WithContext {
+                                context: context.context.clone(),
+                                row_col: context.row_col,
+                                error: Box::new(ParserError::ExtraInput {
+                                    parsed_value: value
+                                }),
+                            });
+                        }
+                    }
                 }
             }
         }
         Ok(value)
     } else {
         let mut context = NoOpParseObserver;
-        let ParserSuccess {
-            remaining_input,
-            value,
-        } = parse_helper(&chars, ParserState::Begin, &mut context, &opts)?;
-        if !opts.allow_extra_input {
-            for c in remaining_input {
-                if !is_whitespace(*c) {
-                    return Err(ParserError::ExtraInput {
-                        parsed_value: value,
-                        extra_input: remaining_input.to_vec(),
-                    });
-                };
+        let value = parse_helper(&mut chars, ParserState::Begin, &mut context, &opts)?;
+        if !opts.allow_extra_input {loop {
+            match chars.next() {
+                None => { break; }
+                Some(c) => {
+                    if !is_whitespace(c) {
+                        return Err(ParserError::ExtraInput {
+                            parsed_value: value
+                        });
+                    }
+                }
             }
+        }
         }
 
         Ok(value)
