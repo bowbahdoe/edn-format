@@ -128,14 +128,18 @@ pub enum Value {
     ///
     /// <https://github.com/edn-format/edn#nil>
     Nil,
-    /// A string. Used to represent textual data.
+    /// A boolean value
     ///
-    /// <https://github.com/edn-format/edn#strings>
-    String(String),
+    /// <https://github.com/edn-format/edn#booleans>
+    Boolean(bool),
     /// A single character.
     ///
     /// <https://github.com/edn-format/edn#characters>
     Character(char),
+    /// A string. Used to represent textual data.
+    ///
+    /// <https://github.com/edn-format/edn#strings>
+    String(String),
     /// A symbol. Used to represent identifiers.
     ///
     /// <https://github.com/edn-format/edn#symbols>
@@ -150,8 +154,6 @@ pub enum Value {
     /// <https://github.com/edn-format/edn#integers>
     Integer(i64),
     /// A floating point number with 64 bit precision.
-    /// This implementation uses [ordered_float::OrderedFloat], so the result
-    /// you get does not directly conform to IEEE spec.
     ///
     /// <https://github.com/edn-format/edn#floating-point-numbers>
     Float(OrderedFloat<f64>),
@@ -185,10 +187,6 @@ pub enum Value {
     ///
     /// <https://github.com/edn-format/edn#sets>
     Set(BTreeSet<Value>),
-    /// A boolean value
-    ///
-    /// <https://github.com/edn-format/edn#booleans>
-    Boolean(bool),
     /// An instant in time. Represented as a tagged element with tag `inst` and value
     /// a [RFC-3339](https://www.ietf.org/rfc/rfc3339.txt) formatted string.
     ///
@@ -212,6 +210,96 @@ pub enum Value {
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         equal(self, other)
+    }
+}
+
+impl From<()> for Value {
+    fn from(_: ()) -> Self {
+        Value::Nil
+    }
+}
+
+impl<T: Into<Value>> From<Option<T>> for Value {
+    fn from(opt: Option<T>) -> Self {
+        opt.map(|o| o.into()).unwrap_or(Value::Nil)
+    }
+}
+
+impl From<char> for Value {
+    fn from(c: char) -> Self {
+        Value::Character(c)
+    }
+}
+
+impl From<&str> for Value {
+    fn from(s: &str) -> Self {
+        Value::String(s.to_string())
+    }
+}
+
+impl From<String> for Value {
+    fn from(s: String) -> Self {
+        Value::String(s)
+    }
+}
+
+impl From<Symbol> for Value {
+    fn from(sym: Symbol) -> Self {
+        Value::Symbol(sym)
+    }
+}
+
+impl From<Keyword> for Value {
+    fn from(kw: Keyword) -> Self {
+        Value::Keyword(kw)
+    }
+}
+
+impl From<i64> for Value {
+    fn from(i: i64) -> Self {
+        Value::Integer(i)
+    }
+}
+
+impl From<f64> for Value {
+    fn from(f: f64) -> Self {
+        Value::Float(OrderedFloat(f))
+    }
+}
+
+impl From<OrderedFloat<f64>> for Value {
+    fn from(of: OrderedFloat<f64>) -> Self {
+        Value::Float(of)
+    }
+}
+
+impl From<BigInt> for Value {
+    fn from(bi: BigInt) -> Self {
+        Value::BigInt(bi)
+    }
+}
+
+impl From<BigDecimal> for Value {
+    fn from(bd: BigDecimal) -> Self {
+        Value::BigDec(bd)
+    }
+}
+
+impl From<bool> for Value {
+    fn from(b: bool) -> Self {
+        Value::Boolean(b)
+    }
+}
+
+impl From<chrono::DateTime<FixedOffset>> for Value {
+    fn from(date: chrono::DateTime<FixedOffset>) -> Self {
+        Value::Inst(date)
+    }
+}
+
+impl From<Uuid> for Value {
+    fn from(uuid: Uuid) -> Self {
+        Value::Uuid(uuid)
     }
 }
 
@@ -387,14 +475,7 @@ fn equal(v1: &Value, v2: &Value) -> bool {
         // of elements is the same, and for which each corresponding pair of
         // elements (by ordinal) is equal.
         (Value::List(vals1) | Value::Vector(vals1), Value::List(vals2) | Value::Vector(vals2)) => {
-            if vals1.len() != vals2.len() {
-                false
-            } else {
-                vals1
-                    .iter()
-                    .zip(vals2.iter())
-                    .fold(true, |all_same, (v1, v2)| all_same && equal(v1, v2))
-            }
+            vals1 == vals2
         }
 
         // sets are equal if they have the same count of elements and,
@@ -565,7 +646,6 @@ fn interpret_atom(atom: &[char]) -> Result<Value, ParserError> {
         &['/', ..] => Err(ParserError::CannotHaveSlashAtBeginningOfSymbol),
         &[.., '/'] => Err(ParserError::CannotHaveSlashAtEndOfSymbol),
         &[':', ref rest @ ..] => {
-            // TODO: make sure name is not a number
             let split: Vec<_> = rest.split(|c| *c == '/').collect();
             match split[..] {
                 [name] => Ok(Value::Keyword(Keyword::from_name(&char_slice_to_str(name)))),
@@ -583,7 +663,6 @@ fn interpret_atom(atom: &[char]) -> Result<Value, ParserError> {
             }
         }
         chars => {
-            // TODO: Check if number
             let split: Vec<_> = chars.split(|c| *c == '/').collect();
             match split[..] {
                 [name] => {
@@ -1058,17 +1137,17 @@ fn parse_helper<'a, Observer: ParseObserver>(
                     value,
                 } = parse_helper(s, ParserState::Begin, observer, opts)?;
 
-                if let Value::Symbol(symbol) = value {
+                return if let Value::Symbol(symbol) = value {
                     if symbol.namespace == None {
                         if symbol.name.len() == 1 {
-                            return Ok(ParserSuccess {
+                            Ok(ParserSuccess {
                                 remaining_input,
                                 value: Value::Character(symbol.name.chars().next().expect(
                                     "Asserted that this string has at least one character.",
                                 )),
-                            });
+                            })
                         } else {
-                            return match symbol.name.as_str() {
+                            match symbol.name.as_str() {
                                 "newline" => Ok(ParserSuccess {
                                     remaining_input,
                                     value: Value::Character('\n'),
@@ -1086,14 +1165,14 @@ fn parse_helper<'a, Observer: ParseObserver>(
                                     value: Value::Character('\t'),
                                 }),
                                 _ => Err(ParserError::InvalidCharacterSpecification),
-                            };
+                            }
                         }
                     } else {
-                        return Err(ParserError::InvalidCharacterSpecification);
+                        Err(ParserError::InvalidCharacterSpecification)
                     }
                 } else {
-                    return Err(ParserError::InvalidCharacterSpecification);
-                }
+                    Err(ParserError::InvalidCharacterSpecification)
+                };
             }
         }
     }
@@ -1310,7 +1389,6 @@ pub fn emit_str(value: &Value) -> String {
 mod tests {
     use super::*;
     use chrono::DateTime;
-    use std::iter::FromIterator;
     use std::vec;
 
     #[test]
@@ -2173,4 +2251,48 @@ mod tests {
             Value::Symbol(Symbol::from_namespace_and_name("ab1", "cd1"))
         )
     }
+
+    // Tests here taken from
+    // https://github.com/utkarshkukreti/edn.rs/blob/master/tests/from_tests.rs#L9
+    #[test]
+    fn from_bool() {
+        assert_eq!(Value::from(true), Value::Boolean(true));
+        assert_eq!(Value::from(false), Value::Boolean(false));
+    }
+    #[test]
+    fn from_str() {
+        assert_eq!(Value::from(""), Value::String("".to_string()));
+        assert_eq!(Value::from("hello"), Value::String("hello".to_string()));
+    }
+
+    #[test]
+    fn from_string() {
+        assert_eq!(Value::from("".to_string()), Value::String("".to_string()));
+        assert_eq!(
+            Value::from("hello".to_string()),
+            Value::String("hello".to_string())
+        );
+    }
+
+    #[test]
+    fn from_char() {
+        assert_eq!(Value::from('c'), Value::Character('c'));
+    }
+
+    #[test]
+    fn from_num() {
+        assert_eq!(Value::from(0_i64), Value::Integer(0));
+        assert_eq!(Value::from(0), Value::Integer(0));
+        assert_eq!(Value::from(-1), Value::Integer(-1));
+
+        assert_eq!(Value::from(0_f64), Value::Float(OrderedFloat(0_f64)));
+        assert_eq!(Value::from(0_f64), Value::Float(OrderedFloat(0_f64)));
+
+        assert_eq!(Value::from(0_f64), Value::Float(OrderedFloat(0_f64)));
+        assert_eq!(
+            Value::from(OrderedFloat(0_f64)),
+            Value::Float(OrderedFloat(0_f64))
+        );
+    }
+    // -------------------------------------------------------------------------
 }
