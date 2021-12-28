@@ -1418,7 +1418,12 @@ impl<Iter: Iterator<Item = char>> Iterator for Parser<Iter> {
     type Item = Result<Value, ParserError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match parse_helper(&mut self.iter, ParserState::Begin, &mut NoOpParseObserver, &self.opts) {
+        match parse_helper(
+            &mut self.iter,
+            ParserState::Begin,
+            &mut NoOpParseObserver,
+            &self.opts,
+        ) {
             Err(error) => {
                 if error == ParserError::EmptyInput {
                     None
