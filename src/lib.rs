@@ -9,6 +9,7 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::iter::{FromIterator, Peekable};
 use std::num::{ParseFloatError, ParseIntError};
+use std::str::{Chars, FromStr};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -360,6 +361,9 @@ pub enum ParserError {
     #[error("Cannot have more than one slash in a symbol")]
     CannotHaveMoreThanOneSlashInSymbol,
 
+    #[error("Cannot have a colon in a symbol")]
+    CannotHaveAColonInASymbol,
+
     #[error("Cannot have slash at the beginning of symbol")]
     CannotHaveSlashAtBeginningOfKeyword,
 
@@ -368,6 +372,9 @@ pub enum ParserError {
 
     #[error("Cannot have more than one slash in a symbol")]
     CannotHaveMoreThanOneSlashInKeyword,
+
+    #[error("Cannot have a colon in a symbol")]
+    CannotHaveAColonInAKeyword,
 
     #[error("Only 0 can start with 0")]
     OnlyZeroCanStartWithZero,
@@ -397,16 +404,27 @@ pub enum ParserError {
     },
 
     #[error("Unexpected Extra Input")]
-    ExtraInput {
-        parsed_value: Value
-    },
+    ExtraInput { parsed_value: Value },
+}
 
-    #[error("Error with context")]
-    WithContext {
-        context: Vec<Context>,
-        row_col: RowCol,
-        error: Box<ParserError>,
-    },
+#[derive(Debug, Error, PartialEq)]
+pub struct ParserErrorWithContext {
+    /// Vector holding the context that the parser was working in.
+    ///
+    /// Intended to be useful for giving hints to a user about how to fix their input.
+    pub context: Vec<Context>,
+    /// The row where the error was detected. 1 indexed. 0 if no characters on the line have been read.
+    pub row: usize,
+    /// The col where the error was detected. 1 indexed. Starts at 1.
+    pub col: usize,
+    /// The error that the parser ran into.
+    pub error: ParserError,
+}
+
+impl Display for ParserErrorWithContext {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "({}, {}): {}", self.row, self.col, self.error)
+    }
 }
 
 #[derive(Debug)]
@@ -498,11 +516,26 @@ fn equal(v1: &Value, v2: &Value) -> bool {
 
 /// Struct holding a row position and a column position.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct RowCol {
+struct RowCol {
     /// The row. 1 indexed. 0 if no characters on the line have been read.
-    pub row: usize,
+    row: usize,
     /// The col. 1 indexed. Starts at 1.
-    pub col: usize,
+    col: usize,
+}
+
+impl RowCol {
+    fn new() -> RowCol {
+        RowCol { row: 0, col: 1 }
+    }
+
+    fn chomp(&mut self, c: char) {
+        if c == '\n' {
+            self.row = 0;
+            self.col += 1;
+        } else {
+            self.row += 1;
+        }
+    }
 }
 
 /// The purpose of this interface is to keep track of a "context stack"
@@ -523,39 +556,27 @@ trait ParseObserver {
 
     fn stop_parsing_current(&mut self);
 
-    fn advance_one_char(&mut self, start: char);
-}
-
-/// No op observer, for when we want to call the parser recursively consequence free.
-struct NoOpParseObserver;
-
-impl ParseObserver for NoOpParseObserver {
-    fn start_parsing_vector(&mut self) {}
-
-    fn start_parsing_list(&mut self) {}
-
-    fn start_parsing_map(&mut self) {}
-
-    fn start_parsing_set(&mut self) {}
-
-    fn start_parsing_string(&mut self) {}
-
-    fn start_parsing_atom(&mut self) {}
-
-    fn stop_parsing_current(&mut self) {}
-
-    fn advance_one_char(&mut self, _start: char) {}
+    fn advance_one_char(&mut self, c: char);
 }
 
 /// An element of context about what the parser was doing when an error was detected.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Context {
-    ParsingVector(RowCol),
-    ParsingList(RowCol),
-    ParsingMap(RowCol),
-    ParsingSet(RowCol),
-    ParsingString(RowCol),
-    ParsingAtom(RowCol),
+    /// The parser started parsing a vector at the given row and col.
+    ParsingVector { row: usize, col: usize },
+    /// The parser started parsing a vector at the given row and col.
+    ParsingList { row: usize, col: usize },
+    /// The parser started parsing a vector at the given row and col.
+    ParsingMap { row: usize, col: usize },
+    /// The parser started parsing a vector at the given row and col.
+    ParsingSet { row: usize, col: usize },
+    /// The parser started parsing a vector at the given row and col.
+    ParsingString { row: usize, col: usize },
+    /// The parser started parsing an "atom" at the given row and col.
+    ///
+    /// An "atom" might be a symbol, keyword, number, true, false, or nil.
+    /// At the point the parser records this information it does not know which.
+    ParsingAtom { row: usize, col: usize },
 }
 
 #[derive(Debug)]
@@ -568,47 +589,60 @@ impl ContextStackerObserver {
     fn new() -> ContextStackerObserver {
         ContextStackerObserver {
             context: Vec::new(),
-            row_col: RowCol { row: 0, col: 1 },
+            row_col: RowCol::new(),
         }
     }
 }
 
 impl ParseObserver for ContextStackerObserver {
     fn start_parsing_vector(&mut self) {
-        self.context.push(Context::ParsingVector(self.row_col));
+        self.context.push(Context::ParsingVector {
+            row: self.row_col.row,
+            col: self.row_col.col,
+        });
     }
 
     fn start_parsing_list(&mut self) {
-        self.context.push(Context::ParsingList(self.row_col));
+        self.context.push(Context::ParsingList {
+            row: self.row_col.row,
+            col: self.row_col.col,
+        });
     }
 
     fn start_parsing_map(&mut self) {
-        self.context.push(Context::ParsingMap(self.row_col));
+        self.context.push(Context::ParsingMap {
+            row: self.row_col.row,
+            col: self.row_col.col,
+        });
     }
 
     fn start_parsing_set(&mut self) {
-        self.context.push(Context::ParsingSet(self.row_col));
+        self.context.push(Context::ParsingSet {
+            row: self.row_col.row,
+            col: self.row_col.col,
+        });
     }
 
     fn start_parsing_string(&mut self) {
-        self.context.push(Context::ParsingString(self.row_col));
+        self.context.push(Context::ParsingString {
+            row: self.row_col.row,
+            col: self.row_col.col,
+        });
     }
 
     fn start_parsing_atom(&mut self) {
-        self.context.push(Context::ParsingAtom(self.row_col));
+        self.context.push(Context::ParsingAtom {
+            row: self.row_col.row,
+            col: self.row_col.col,
+        });
     }
 
     fn stop_parsing_current(&mut self) {
         self.context.pop();
     }
 
-    fn advance_one_char(&mut self, start: char) {
-        if start == '\n' {
-            self.row_col.row = 0;
-            self.row_col.col += 1;
-        } else {
-            self.row_col.row += 1;
-        }
+    fn advance_one_char(&mut self, c: char) {
+        self.row_col.chomp(c)
     }
 }
 
@@ -729,7 +763,7 @@ fn interpret_atom(atom: &[char]) -> Result<Value, ParserError> {
 }
 
 /// Likely suboptimal parsing. Focus for now is just on getting correct results.
-fn parse_helper<'a, Observer: ParseObserver, Iter: Iterator<Item=char>>(
+fn parse_helper<Observer: ParseObserver, Iter: Iterator<Item = char>>(
     s: &mut Peekable<Iter>,
     mut parser_state: ParserState,
     observer: &mut Observer,
@@ -756,47 +790,45 @@ fn parse_helper<'a, Observer: ParseObserver, Iter: Iterator<Item=char>>(
             }
         };
         match &mut parser_state {
-            ParserState::Begin => {
-                match s.next() {
-                    None => return Err(ParserError::EmptyInput),
-                    Some(c) => {
-                        observer.advance_one_char(c);
-                        if is_whitespace(c) {
-                            parser_state = ParserState::Begin;
-                        } else if c == '(' {
-                            observer.start_parsing_list();
-                            parser_state = ParserState::ParsingList {
-                                values_so_far: vec![],
-                            };
-                        } else if c == '[' {
-                            observer.start_parsing_vector();
-                            parser_state = ParserState::ParsingVector {
-                                values_so_far: vec![],
-                            };
-                        } else if c == '{' {
-                            observer.start_parsing_map();
-                            parser_state = ParserState::ParsingMap {
-                                values_so_far: vec![],
-                            };
-                        } else if c == '"' {
-                            observer.start_parsing_string();
-                            parser_state = ParserState::ParsingString {
-                                built_up: "".to_string(),
-                            };
-                        } else if c == '\\' {
-                            parser_state = ParserState::ParsingCharacter;
-                        } else if c == '#' {
-                            parser_state = ParserState::SelectingDispatch;
-                        } else if is_allowed_atom_character(c) || c == ':' {
-                            let built_up = vec![c];
-                            observer.start_parsing_atom();
-                            parser_state = ParserState::ParsingAtom { built_up };
-                        } else {
-                            return Err(ParserError::UnexpectedCharacter(c));
-                        }
+            ParserState::Begin => match s.next() {
+                None => return Err(ParserError::EmptyInput),
+                Some(c) => {
+                    observer.advance_one_char(c);
+                    if is_whitespace(c) {
+                        parser_state = ParserState::Begin;
+                    } else if c == '(' {
+                        observer.start_parsing_list();
+                        parser_state = ParserState::ParsingList {
+                            values_so_far: vec![],
+                        };
+                    } else if c == '[' {
+                        observer.start_parsing_vector();
+                        parser_state = ParserState::ParsingVector {
+                            values_so_far: vec![],
+                        };
+                    } else if c == '{' {
+                        observer.start_parsing_map();
+                        parser_state = ParserState::ParsingMap {
+                            values_so_far: vec![],
+                        };
+                    } else if c == '"' {
+                        observer.start_parsing_string();
+                        parser_state = ParserState::ParsingString {
+                            built_up: "".to_string(),
+                        };
+                    } else if c == '\\' {
+                        parser_state = ParserState::ParsingCharacter;
+                    } else if c == '#' {
+                        parser_state = ParserState::SelectingDispatch;
+                    } else if is_allowed_atom_character(c) || c == ':' {
+                        let built_up = vec![c];
+                        observer.start_parsing_atom();
+                        parser_state = ParserState::ParsingAtom { built_up };
+                    } else {
+                        return Err(ParserError::UnexpectedCharacter(c));
                     }
                 }
-            }
+            },
 
             ParserState::ParsingList {
                 ref mut values_so_far,
@@ -824,27 +856,25 @@ fn parse_helper<'a, Observer: ParseObserver, Iter: Iterator<Item=char>>(
             // Almost total duplicate of ParsingList
             ParserState::ParsingVector {
                 ref mut values_so_far,
-            } => {
-                match s.peek() {
-                    None => {
-                        return Err(ParserError::UnexpectedEndOfInput);
-                    }
-                    Some(c) => {
-                        if is_whitespace(*c) {
-                            observer.advance_one_char(*c);
-                            s.next();
-                        } else if *c == ']' {
-                            observer.stop_parsing_current();
-                            observer.advance_one_char(*c);
-                            s.next();
-                            return Ok(Value::Vector(values_so_far.clone()));
-                        } else {
-                            let value = parse_helper(s, ParserState::Begin, observer, opts)?;
-                            values_so_far.push(value);
-                        }
+            } => match s.peek() {
+                None => {
+                    return Err(ParserError::UnexpectedEndOfInput);
+                }
+                Some(c) => {
+                    if is_whitespace(*c) {
+                        observer.advance_one_char(*c);
+                        s.next();
+                    } else if *c == ']' {
+                        observer.stop_parsing_current();
+                        observer.advance_one_char(*c);
+                        s.next();
+                        return Ok(Value::Vector(values_so_far.clone()));
+                    } else {
+                        let value = parse_helper(s, ParserState::Begin, observer, opts)?;
+                        values_so_far.push(value);
                     }
                 }
-            }
+            },
 
             ParserState::ParsingMap {
                 ref mut values_so_far,
@@ -874,7 +904,9 @@ fn parse_helper<'a, Observer: ParseObserver, Iter: Iterator<Item=char>>(
                                 let mut seen = BTreeSet::new();
                                 for (k, _) in entries.iter() {
                                     if seen.contains(k) {
-                                        return Err(ParserError::DuplicateKeyInMap { value: k.clone() });
+                                        return Err(ParserError::DuplicateKeyInMap {
+                                            value: k.clone(),
+                                        });
                                     }
                                     seen.insert(k);
                                 }
@@ -895,131 +927,126 @@ fn parse_helper<'a, Observer: ParseObserver, Iter: Iterator<Item=char>>(
 
             ParserState::ParsingSet {
                 ref mut values_so_far,
-            } => {
-                match s.peek() {
-                    None => {
-                        return Err(ParserError::UnexpectedEndOfInput);
-                    }
-                    Some(c) => {
-                        if is_whitespace(*c) {
-                            observer.advance_one_char(*c);
-                            s.next();
-                        } else if *c == '}' {
-                            let mut seen = BTreeSet::new();
-                            for v in values_so_far.iter() {
-                                if seen.contains(v) {
-                                    return Err(ParserError::DuplicateValueInSet { value: v.clone() });
-                                }
-                                seen.insert(v);
+            } => match s.peek() {
+                None => {
+                    return Err(ParserError::UnexpectedEndOfInput);
+                }
+                Some(c) => {
+                    if is_whitespace(*c) {
+                        observer.advance_one_char(*c);
+                        s.next();
+                    } else if *c == '}' {
+                        let mut seen = BTreeSet::new();
+                        for v in values_so_far.iter() {
+                            if seen.contains(v) {
+                                return Err(ParserError::DuplicateValueInSet { value: v.clone() });
                             }
-                            observer.stop_parsing_current();
-                            observer.advance_one_char(*c);
-                            s.next();
-                            return Ok(Value::Set(values_so_far.iter().cloned().collect()));
-                        } else {
-                            let value = parse_helper(s, ParserState::Begin, observer, opts)?;
-                            values_so_far.push(value);
+                            seen.insert(v);
                         }
+                        observer.stop_parsing_current();
+                        observer.advance_one_char(*c);
+                        s.next();
+                        return Ok(Value::Set(values_so_far.iter().cloned().collect()));
+                    } else {
+                        let value = parse_helper(s, ParserState::Begin, observer, opts)?;
+                        values_so_far.push(value);
                     }
                 }
-            }
+            },
 
-            ParserState::ParsingAtom { ref mut built_up } => {
-                match s.peek() {
-                    None => {
-                        return if built_up.is_empty() {
-                            Err(ParserError::UnexpectedEndOfInput)
-                        } else {
-                            // TODO: Shift this stop call to after successful interpretation
-                            observer.stop_parsing_current();
-                            Ok(interpret_atom(built_up)?)
-                        }
-                    }
-                    Some(c) => {
-                        if !is_allowed_atom_character(*c) {
-                            observer.stop_parsing_current();
-                            return Ok(interpret_atom(built_up)?);
-                        }
-                        else {
-                            built_up.push(*c);
-                            observer.advance_one_char(*c);
-                            s.next();
-                        }
+            ParserState::ParsingAtom { ref mut built_up } => match s.peek() {
+                None => {
+                    return if built_up.is_empty() {
+                        Err(ParserError::UnexpectedEndOfInput)
+                    } else {
+                        let value = interpret_atom(built_up)?;
+                        observer.stop_parsing_current();
+                        Ok(value)
                     }
                 }
-            }
+                Some(c) => {
+                    if !is_allowed_atom_character(*c) {
+                        let value = interpret_atom(built_up)?;
+                        observer.stop_parsing_current();
+                        return Ok(value);
+                    } else {
+                        built_up.push(*c);
+                        observer.advance_one_char(*c);
+                        s.next();
+                    }
+                }
+            },
 
-            ParserState::ParsingString { ref mut built_up } => {
-                match s.peek() {
-                    None => return Err(ParserError::UnexpectedEndOfInput),
-                    Some(c) => {
-                        if *c == '"' {
-                            observer.stop_parsing_current();
-                            observer.advance_one_char(*c);
-                            s.next();
-                            return Ok(Value::String(built_up.clone()));
-                        } else if *c == '\\' {
-                            observer.advance_one_char(*c);
-                            s.next();
-                            match s.next() {
-                                None => return Err(ParserError::InvalidStringEscape),
-                                Some(c) => {
-                                    observer.advance_one_char(c);
-                                    match c {
-                                        't' => built_up.push('\t'),
-                                        'r' => built_up.push('\r'),
-                                        'n' => built_up.push('\n'),
+            ParserState::ParsingString { ref mut built_up } => match s.peek() {
+                None => return Err(ParserError::UnexpectedEndOfInput),
+                Some(c) => {
+                    if *c == '"' {
+                        observer.stop_parsing_current();
+                        observer.advance_one_char(*c);
+                        s.next();
+                        return Ok(Value::String(built_up.clone()));
+                    } else if *c == '\\' {
+                        observer.advance_one_char(*c);
+                        s.next();
+                        match s.next() {
+                            None => return Err(ParserError::InvalidStringEscape),
+                            Some(c) => {
+                                observer.advance_one_char(c);
+                                match c {
+                                    't' => built_up.push('\t'),
+                                    'r' => built_up.push('\r'),
+                                    'n' => built_up.push('\n'),
 
-                                        '\\' => built_up.push('\\'),
-                                        '"' => built_up.push('"'),
-                                        'u' => {
-                                            match (s.next(), s.next(), s.next(), s.next()) {
-                                                (Some(c1), Some(c2), Some(c3), Some(c4)) => {
-                                                    observer.advance_one_char(c1);
-                                                    observer.advance_one_char(c2);
-                                                    observer.advance_one_char(c3);
-                                                    observer.advance_one_char(c4);
-                                                    let str: String = [c1, c2, c3, c4].iter().copied().collect();
-                                                    let unicode = u32::from_str_radix(&str, 16)
-                                                        .map_err(|_| ParserError::InvalidStringEscape)?;
-                                                    match char::from_u32(unicode) {
-                                                        None => return Err(ParserError::InvalidStringEscape),
-                                                        Some(c) => built_up.push(c),
-                                                    }
-                                                    continue 'parsing;
+                                    '\\' => built_up.push('\\'),
+                                    '"' => built_up.push('"'),
+                                    'u' => match (s.next(), s.next(), s.next(), s.next()) {
+                                        (Some(c1), Some(c2), Some(c3), Some(c4)) => {
+                                            observer.advance_one_char(c1);
+                                            observer.advance_one_char(c2);
+                                            observer.advance_one_char(c3);
+                                            observer.advance_one_char(c4);
+                                            let str: String =
+                                                [c1, c2, c3, c4].iter().copied().collect();
+                                            let unicode = u32::from_str_radix(&str, 16)
+                                                .map_err(|_| ParserError::InvalidStringEscape)?;
+                                            match char::from_u32(unicode) {
+                                                None => {
+                                                    return Err(ParserError::InvalidStringEscape)
                                                 }
-                                                (Some(c1), Some(c2), Some(c3), _) => {
-                                                    observer.advance_one_char(c1);
-                                                    observer.advance_one_char(c2);
-                                                    observer.advance_one_char(c3);
-                                                    return Err(ParserError::InvalidStringEscape);
-                                                }
-                                                (Some(c1), Some(c2), _, _) => {
-                                                    observer.advance_one_char(c1);
-                                                    observer.advance_one_char(c2);
-                                                    return Err(ParserError::InvalidStringEscape);
-                                                }
-                                                (Some(c1), _, _, _) => {
-                                                    observer.advance_one_char(c1);
-                                                    return Err(ParserError::InvalidStringEscape);
-                                                }
-                                                _ => {
-                                                    return Err(ParserError::InvalidStringEscape);
-                                                }
+                                                Some(c) => built_up.push(c),
                                             }
+                                            continue 'parsing;
                                         }
-                                        _ => return Err(ParserError::InvalidStringEscape),
-                                    }
+                                        (Some(c1), Some(c2), Some(c3), _) => {
+                                            observer.advance_one_char(c1);
+                                            observer.advance_one_char(c2);
+                                            observer.advance_one_char(c3);
+                                            return Err(ParserError::InvalidStringEscape);
+                                        }
+                                        (Some(c1), Some(c2), _, _) => {
+                                            observer.advance_one_char(c1);
+                                            observer.advance_one_char(c2);
+                                            return Err(ParserError::InvalidStringEscape);
+                                        }
+                                        (Some(c1), _, _, _) => {
+                                            observer.advance_one_char(c1);
+                                            return Err(ParserError::InvalidStringEscape);
+                                        }
+                                        _ => {
+                                            return Err(ParserError::InvalidStringEscape);
+                                        }
+                                    },
+                                    _ => return Err(ParserError::InvalidStringEscape),
                                 }
                             }
-                        } else {
-                            built_up.push(*c);
-                            observer.advance_one_char(*c);
-                            s.next();
                         }
+                    } else {
+                        built_up.push(*c);
+                        observer.advance_one_char(*c);
+                        s.next();
                     }
                 }
-            }
+            },
             ParserState::SelectingDispatch => {
                 match s.peek() {
                     None => {
@@ -1050,10 +1077,11 @@ fn parse_helper<'a, Observer: ParseObserver, Iter: Iterator<Item=char>>(
                                     // Handle builtin #inst
                                     if symbol.namespace == None && symbol.name == "inst" {
                                         if let Value::String(timestamp) = next_success {
-                                            let datetime = chrono::DateTime::parse_from_rfc3339(&timestamp)
-                                                .map_err(|parse_error| {
-                                                    ParserError::InvalidInst(Some(parse_error))
-                                                })?;
+                                            let datetime =
+                                                chrono::DateTime::parse_from_rfc3339(&timestamp)
+                                                    .map_err(|parse_error| {
+                                                        ParserError::InvalidInst(Some(parse_error))
+                                                    })?;
                                             return Ok(Value::Inst(datetime));
                                         } else {
                                             return Err(ParserError::InvalidInst(None));
@@ -1062,10 +1090,11 @@ fn parse_helper<'a, Observer: ParseObserver, Iter: Iterator<Item=char>>(
                                     // Handle builtin #uuid
                                     else if symbol.namespace == None && symbol.name == "uuid" {
                                         if let Value::String(uuid_str) = next_success {
-                                            let uuid =
-                                                Uuid::parse_str(&uuid_str).map_err(|parse_error| {
+                                            let uuid = Uuid::parse_str(&uuid_str).map_err(
+                                                |parse_error| {
                                                     ParserError::InvalidUuid(Some(parse_error))
-                                                })?;
+                                                },
+                                            )?;
                                             return Ok(Value::Uuid(uuid));
                                         } else {
                                             return Err(ParserError::InvalidUuid(None));
@@ -1074,21 +1103,17 @@ fn parse_helper<'a, Observer: ParseObserver, Iter: Iterator<Item=char>>(
                                     // Everything else becomes a generic TaggedElement
                                     else {
                                         return Ok(Value::TaggedElement(
-                                                symbol,
-                                                Box::new(next_success),
-                                            ));
+                                            symbol,
+                                            Box::new(next_success),
+                                        ));
                                     }
                                 }
                                 Value::Keyword(ref ns) => {
                                     if !opts.allow_namespaced_map_syntax || ns.namespace.is_some() {
                                         return Err(ParserError::InvalidElementForTag { value });
                                     } else {
-                                        let next_success = parse_helper(
-                                            s,
-                                            ParserState::Begin,
-                                            observer,
-                                            opts,
-                                        )?;
+                                        let next_success =
+                                            parse_helper(s, ParserState::Begin, observer, opts)?;
                                         if let Value::Map(following_map) = next_success {
                                             let mut new_map = BTreeMap::new();
                                             for (k, v) in following_map.into_iter() {
@@ -1137,8 +1162,8 @@ fn parse_helper<'a, Observer: ParseObserver, Iter: Iterator<Item=char>>(
                             )))
                         } else {
                             match symbol.name.as_str() {
-                                "newline" => Ok( Value::Character('\n')),
-                                "return" => Ok( Value::Character('\r')),
+                                "newline" => Ok(Value::Character('\n')),
+                                "return" => Ok(Value::Character('\r')),
                                 "space" => Ok(Value::Character(' ')),
                                 "tab" => Ok(Value::Character('\t')),
                                 _ => Err(ParserError::InvalidCharacterSpecification),
@@ -1158,16 +1183,6 @@ fn parse_helper<'a, Observer: ParseObserver, Iter: Iterator<Item=char>>(
 /// Options you can pass to the EDN parser.
 #[derive(Debug, Copy, Clone)]
 pub struct ParserOptions {
-    /// Whether to return errors with the context of what forms the parser was
-    /// parsing and the line numbers where the errors occurred.
-    ///
-    /// Defaults to false.
-    pub track_line_numbers: bool,
-    /// Whether or not to error if there exists non-whitespace content after
-    /// a valid EDN form.
-    ///
-    /// Defaults to false.
-    pub allow_extra_input: bool,
     /// Whether to allow the #some.ns{:key "val"} syntax that was introduced in clojure 1.9
     /// but not reflected in the EDN spec.
     ///
@@ -1178,68 +1193,41 @@ pub struct ParserOptions {
 impl Default for ParserOptions {
     fn default() -> Self {
         ParserOptions {
-            track_line_numbers: false,
-            allow_extra_input: false,
             allow_namespaced_map_syntax: true,
         }
     }
 }
 
 /// Parse EDN from the given input string with the given options.
-pub fn parse_str_with_options(s: &str, opts: ParserOptions) -> Result<Value, ParserError> {
+pub fn parse_str_with_options(
+    s: &str,
+    opts: ParserOptions,
+) -> Result<Value, ParserErrorWithContext> {
     let mut chars = s.chars().peekable();
-    if opts.track_line_numbers {
-        let mut context = ContextStackerObserver::new();
-        let value = parse_helper(&mut chars, ParserState::Begin, &mut context, &opts).map_err(|err| {
-            ParserError::WithContext {
+    let mut context = ContextStackerObserver::new();
+    let value =
+        parse_helper(&mut chars, ParserState::Begin, &mut context, &opts).map_err(|err| {
+            ParserErrorWithContext {
                 context: context.context.clone(),
-                row_col: context.row_col,
-                error: Box::new(err),
+                row: context.row_col.row,
+                col: context.row_col.col,
+                error: err,
             }
         })?;
-        if !opts.allow_extra_input {
-            loop {
-                match chars.next() {
-                    None => { break; }
-                    Some(c) => {
-                        if !is_whitespace(c) {
-                            return Err(ParserError::WithContext {
-                                context: context.context.clone(),
-                                row_col: context.row_col,
-                                error: Box::new(ParserError::ExtraInput {
-                                    parsed_value: value
-                                }),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-        Ok(value)
-    } else {
-        let mut context = NoOpParseObserver;
-        let value = parse_helper(&mut chars, ParserState::Begin, &mut context, &opts)?;
-        if !opts.allow_extra_input {loop {
-            match chars.next() {
-                None => { break; }
-                Some(c) => {
-                    if !is_whitespace(c) {
-                        return Err(ParserError::ExtraInput {
-                            parsed_value: value
-                        });
-                    }
-                }
-            }
-        }
-        }
-
-        Ok(value)
-    }
+    Ok(value)
 }
 
 /// Parse EDN from the given input string with default options.
-pub fn parse_str(s: &str) -> Result<Value, ParserError> {
+pub fn parse_str(s: &str) -> Result<Value, ParserErrorWithContext> {
     parse_str_with_options(s, ParserOptions::default())
+}
+
+impl FromStr for Value {
+    type Err = ParserErrorWithContext;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        parse_str(s)
+    }
 }
 
 impl Display for Value {
@@ -1363,9 +1351,55 @@ pub fn emit_str(value: &Value) -> String {
     format!("{}", value)
 }
 
+pub struct Parser<Iter: Iterator<Item = char>> {
+    opts: ParserOptions,
+    iter: Peekable<Iter>,
+}
+
+impl<'a> Parser<Chars<'a>> {
+    pub fn from_str(s: &'a str, opts: ParserOptions) -> Parser<Chars<'a>> {
+        Parser::from_iterator(s.chars(), opts)
+    }
+}
+
+impl<Iter: Iterator<Item = char>> Parser<Iter> {
+    pub fn from_iterator(iter: Iter, opts: ParserOptions) -> Parser<Iter> {
+        Parser {
+            opts,
+            iter: iter.peekable(),
+        }
+    }
+}
+
+impl<Iter: Iterator<Item = char>> Iterator for Parser<Iter> {
+    type Item = Result<Value, ParserErrorWithContext>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut context = ContextStackerObserver::new();
+        match parse_helper(&mut self.iter, ParserState::Begin, &mut context, &self.opts).map_err(
+            |err| ParserErrorWithContext {
+                context: context.context.clone(),
+                row: context.row_col.row,
+                col: context.row_col.col,
+                error: err,
+            },
+        ) {
+            Err(error_with_context) => {
+                if error_with_context.error == ParserError::EmptyInput {
+                    None
+                } else {
+                    Some(Err(error_with_context))
+                }
+            }
+            Ok(value) => Some(Ok(value)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Context::ParsingAtom;
     use chrono::DateTime;
     use std::vec;
 
@@ -1433,10 +1467,13 @@ mod tests {
 
     #[test]
     fn test_parsing_uneven_map() {
-        assert_eq!(Err(ParserError::OddNumberOfMapElements), parse_str("{()}"));
         assert_eq!(
             Err(ParserError::OddNumberOfMapElements),
-            parse_str("{() [] []}")
+            parse_str("{()}").map_err(|err| err.error)
+        );
+        assert_eq!(
+            Err(ParserError::OddNumberOfMapElements),
+            parse_str("{() [] []}").map_err(|err| err.error)
         )
     }
 
@@ -1471,7 +1508,7 @@ mod tests {
             Err(ParserError::DuplicateKeyInMap {
                 value: Value::List(vec![])
             }),
-            parse_str("{()[] () ()}")
+            parse_str("{()[] () ()}").map_err(|err| err.error)
         )
     }
 
@@ -1570,23 +1607,23 @@ mod tests {
     fn test_parsing_symbol_errs() {
         assert_eq!(
             Err(ParserError::CannotHaveSlashAtBeginningOfSymbol),
-            parse_str("/abc")
+            parse_str("/abc").map_err(|err| err.error)
         );
         assert_eq!(
             Err(ParserError::CannotHaveSlashAtEndOfSymbol),
-            parse_str("abc/")
+            parse_str("abc/").map_err(|err| err.error)
         );
         assert_eq!(
             Err(ParserError::CannotHaveSlashAtEndOfSymbol),
-            parse_str("abc/ ")
+            parse_str("abc/ ").map_err(|err| err.error)
         );
         assert_eq!(
             Err(ParserError::CannotHaveSlashAtEndOfSymbol),
-            parse_str("abc/ []")
+            parse_str("abc/ []").map_err(|err| err.error)
         );
         assert_eq!(
             Err(ParserError::CannotHaveMoreThanOneSlashInSymbol),
-            parse_str("a/b/c")
+            parse_str("a/b/c").map_err(|err| err.error)
         );
     }
 
@@ -1609,25 +1646,28 @@ mod tests {
     fn test_parsing_keyword_errs() {
         assert_eq!(
             Err(ParserError::CannotHaveSlashAtBeginningOfKeyword),
-            parse_str(":/abc")
+            parse_str(":/abc").map_err(|err| err.error)
         );
         assert_eq!(
             Err(ParserError::CannotHaveSlashAtEndOfKeyword),
-            parse_str(":abc/")
+            parse_str(":abc/").map_err(|err| err.error)
         );
         assert_eq!(
             Err(ParserError::CannotHaveSlashAtEndOfKeyword),
-            parse_str(":abc/ ")
+            parse_str(":abc/ ").map_err(|err| err.error)
         );
         assert_eq!(
             Err(ParserError::CannotHaveSlashAtEndOfKeyword),
-            parse_str(":abc/ []")
+            parse_str(":abc/ []").map_err(|err| err.error)
         );
         assert_eq!(
             Err(ParserError::CannotHaveMoreThanOneSlashInKeyword),
-            parse_str(":a/b/c")
+            parse_str(":a/b/c").map_err(|err| err.error)
         );
-        assert_eq!(Err(ParserError::InvalidKeyword), parse_str("::namespaced"));
+        assert_eq!(
+            Err(ParserError::InvalidKeyword),
+            parse_str("::namespaced").map_err(|err| err.error)
+        );
     }
 
     #[test]
@@ -1648,7 +1688,7 @@ mod tests {
             Err(ParserError::DuplicateValueInSet {
                 value: Value::Symbol(Symbol::from_name("a"))
             }),
-            parse_str("#{a b c d e f a g h}")
+            parse_str("#{a b c d e f a g h}").map_err(|err| err.error)
         )
     }
 
@@ -2066,118 +2106,90 @@ mod tests {
 
     #[test]
     fn test_two_colons() {
-        assert_eq!(Err(ParserError::InvalidKeyword), parse_str("::"))
+        assert_eq!(
+            Err(ParserError::InvalidKeyword),
+            parse_str("::").map_err(|err| err.error)
+        )
     }
 
     #[test]
     fn test_row_col_tracking() {
         assert_eq!(
-            Err(ParserError::WithContext {
-                context: Vec::new(),
-                row_col: RowCol { row: 5, col: 1 },
-                error: Box::new(ParserError::InvalidKeyword)
+            Err(ParserErrorWithContext {
+                context: vec![ParsingAtom { row: 5, col: 1 }],
+                row: 5,
+                col: 1,
+                error: ParserError::InvalidKeyword
             }),
-            parse_str_with_options(
-                "    ::",
-                ParserOptions {
-                    track_line_numbers: true,
-                    ..ParserOptions::default()
-                }
-            )
+            parse_str("    ::",)
         );
         assert_eq!(
-            Err(ParserError::WithContext {
+            Err(ParserErrorWithContext {
                 context: Vec::new(),
-                row_col: RowCol { row: 0, col: 1 },
-                error: Box::new(ParserError::EmptyInput)
+                row: 0,
+                col: 1,
+                error: ParserError::EmptyInput
             }),
-            parse_str_with_options(
-                "",
-                ParserOptions {
-                    track_line_numbers: true,
-                    ..ParserOptions::default()
-                }
-            )
+            parse_str("",)
         );
         assert_eq!(
-            Err(ParserError::WithContext {
-                context: Vec::new(),
-                row_col: RowCol { row: 4, col: 1 },
-                error: Box::new(ParserError::InvalidKeyword)
+            Err(ParserErrorWithContext {
+                context: vec![ParsingAtom { row: 4, col: 1 }],
+                row: 4,
+                col: 1,
+                error: ParserError::InvalidKeyword
             }),
-            parse_str_with_options(
-                "   ::",
-                ParserOptions {
-                    track_line_numbers: true,
-                    ..ParserOptions::default()
-                }
-            )
+            parse_str("   ::",)
         );
         assert_eq!(
-            Err(ParserError::WithContext {
-                context: Vec::new(),
-                row_col: RowCol { row: 1, col: 3 },
-                error: Box::new(ParserError::InvalidKeyword)
+            Err(ParserErrorWithContext {
+                context: vec![ParsingAtom { row: 1, col: 3 }],
+                row: 1,
+                col: 3,
+                error: ParserError::InvalidKeyword
             }),
-            parse_str_with_options(
-                "   \n\n::",
-                ParserOptions {
-                    track_line_numbers: true,
-                    ..ParserOptions::default()
-                }
-            )
+            parse_str("   \n\n::",)
         );
     }
 
     #[test]
     fn test_context_maintaining() {
         assert_eq!(
-            Err(ParserError::WithContext {
-                context: vec![Context::ParsingVector(RowCol { row: 2, col: 1 })],
-                row_col: RowCol { row: 8, col: 1 },
-                error: Box::new(ParserError::InvalidKeyword)
+            Err(ParserErrorWithContext {
+                context: vec![
+                    Context::ParsingVector { row: 2, col: 1 },
+                    ParsingAtom { row: 8, col: 1 }
+                ],
+                row: 8,
+                col: 1,
+                error: ParserError::InvalidKeyword
             }),
-            parse_str_with_options(
-                " [ 1 2 ::a]",
-                ParserOptions {
-                    track_line_numbers: true,
-                    ..ParserOptions::default()
-                }
-            )
+            parse_str(" [ 1 2 ::a]",)
         );
 
         assert_eq!(
-            Err(ParserError::WithContext {
+            Err(ParserErrorWithContext {
                 context: vec![
-                    Context::ParsingList(RowCol { row: 2, col: 1 }),
-                    Context::ParsingSet(RowCol { row: 2, col: 2 }),
-                    Context::ParsingMap(RowCol { row: 1, col: 3 }),
-                    Context::ParsingVector(RowCol { row: 3, col: 3 }),
+                    Context::ParsingList { row: 2, col: 1 },
+                    Context::ParsingSet { row: 2, col: 2 },
+                    Context::ParsingMap { row: 1, col: 3 },
+                    Context::ParsingVector { row: 3, col: 3 },
+                    Context::ParsingAtom { row: 3, col: 5 }
                 ],
-                row_col: RowCol { row: 3, col: 5 },
-                error: Box::new(ParserError::InvalidKeyword)
+                row: 3,
+                col: 5,
+                error: ParserError::InvalidKeyword
             }),
-            parse_str_with_options(
-                " ( a b c \n#{ \n{ [ \n1 2 4\n  ::a  \n3]  3} } )",
-                ParserOptions {
-                    track_line_numbers: true,
-                    ..ParserOptions::default()
-                }
-            )
+            parse_str(" ( a b c \n#{ \n{ [ \n1 2 4\n  ::a  \n3]  3} } )",)
         );
         assert_eq!(
-            Err(ParserError::WithContext {
-                context: vec![Context::ParsingList(RowCol { row: 2, col: 1 })],
-                row_col: RowCol { row: 8, col: 1 },
-                error: Box::new(ParserError::UnexpectedEndOfInput)
+            Err(ParserErrorWithContext {
+                context: vec![Context::ParsingList { row: 2, col: 1 }],
+                row: 8,
+                col: 1,
+                error: ParserError::UnexpectedEndOfInput
             }),
-            parse_str_with_options(
-                " ( [] {}",
-                ParserOptions {
-                    track_line_numbers: true,
-                    ..ParserOptions::default()
-                }
-            )
+            parse_str(" ( [] {}",)
         );
     }
 
@@ -2273,4 +2285,78 @@ mod tests {
         );
     }
     // -------------------------------------------------------------------------
+
+    #[test]
+    fn cant_have_colons_in_symbol() {
+        assert_eq!(
+            parse_str("a:b/a").map_err(|err| err.error),
+            Err(ParserError::CannotHaveAColonInASymbol)
+        );
+        assert_eq!(
+            parse_str("a:/a").map_err(|err| err.error),
+            Err(ParserError::CannotHaveAColonInASymbol)
+        );
+
+        assert_eq!(
+            parse_str("ab/:").map_err(|err| err.error),
+            Err(ParserError::CannotHaveAColonInASymbol)
+        );
+    }
+    assert_eq!(
+        parse_str("ab/a:").map_err(|err| err.error),
+        Err(ParserError::CannotHaveAColonInASymbol)
+    );
+
+    #[test]
+    fn test_many_values() {
+        let mut parser = Parser::from_str("123 456 [] [[]]", ParserOptions::default());
+        assert_eq!(
+            (
+                Some(Ok(Value::from(123))),
+                Some(Ok(Value::from(456))),
+                Some(Ok(Value::Vector(vec![]))),
+                Some(Ok(Value::Vector(vec![Value::Vector(vec![])]))),
+                None,
+                None
+            ),
+            (
+                parser.next(),
+                parser.next(),
+                parser.next(),
+                parser.next(),
+                parser.next(),
+                parser.next()
+            )
+        )
+    }
+
+    #[test]
+    fn test_many_values_with_errors() {
+        let mut parser = Parser::from_str("123 456 [] ::abc [] [[]]", ParserOptions::default());
+        assert_eq!(
+            (
+                Some(Ok(Value::from(123))),
+                Some(Ok(Value::from(456))),
+                Some(Ok(Value::Vector(vec![]))),
+                Some(Err(ParserErrorWithContext {
+                    row: 1,
+                    col: 1,
+                    context: vec![Context::ParsingAtom {row:1, col:1}],
+                    error: ParserError::InvalidKeyword
+                })),
+                Some(Ok(Value::Vector(vec![Value::Vector(vec![])]))),
+                None,
+                None
+            ),
+            (
+                parser.next(),
+                parser.next(),
+                parser.next(),
+                parser.next(),
+                parser.next(),
+                parser.next(),
+                parser.next()
+            )
+        )
+    }
 }
