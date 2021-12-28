@@ -1,5 +1,5 @@
 [![Run Tests](https://github.com/bowbahdoe/edn_format/actions/workflows/run_tests.yml/badge.svg?branch=main)](https://github.com/bowbahdoe/edn_format/actions/workflows/run_tests.yml)
-
+[![codecov](https://codecov.io/gh/bowbahdoe/edn-format/branch/main/graph/badge.svg?token=4YL2AFOIUE)](https://codecov.io/gh/bowbahdoe/edn-format)
 # edn-format
 
 This crate provides an implementation of the [EDN format](https://github.com/edn-format/edn) for rust.

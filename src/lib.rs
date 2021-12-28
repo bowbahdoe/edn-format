@@ -1416,6 +1416,24 @@ mod tests {
     }
 
     #[test]
+    fn test_access_symbol_parts() {
+        let sym = Symbol::from_name("abc");
+        assert_eq!((None, "abc"), (sym.namespace(), sym.name()));
+
+        let sym = Symbol::from_namespace_and_name("abc", "def");
+        assert_eq!((Some("abc"), "def"), (sym.namespace(), sym.name()));
+    }
+
+    #[test]
+    fn test_access_keyword_parts() {
+        let kw = Keyword::from_name("abc");
+        assert_eq!((None, "abc"), (kw.namespace(), kw.name()));
+
+        let kw = Keyword::from_namespace_and_name("abc", "def");
+        assert_eq!((Some("abc"), "def"), (kw.namespace(), kw.name()));
+    }
+
+    #[test]
     fn test_parsing_empty_list() {
         assert_eq!(Value::List(vec![]), parse_str("()").unwrap())
     }
@@ -1939,6 +1957,22 @@ mod tests {
     }
 
     #[test]
+    fn test_bad_bigdec() {
+        assert!(match parse_str("12a3M").map_err(|err| err.error) {
+            Err(ParserError::BadBigDec { .. }) => true,
+            _ => false,
+        });
+    }
+
+    #[test]
+    fn test_bad_bigint() {
+        assert!(match parse_str("12a3N").map_err(|err| err.error) {
+            Err(ParserError::BadBigInt { .. }) => true,
+            _ => false,
+        });
+    }
+
+    #[test]
     fn test_with_comments() {
         assert_eq!(
             Value::List(
@@ -2236,6 +2270,43 @@ mod tests {
         )
     }
 
+    #[test]
+    fn test_bad_string_escape() {
+        assert_eq!(
+            parse_str("\"\\u\"").map_err(|err| err.error),
+            Err(ParserError::InvalidStringEscape)
+        );
+        assert_eq!(
+            parse_str("\"\\u1\"").map_err(|err| err.error),
+            Err(ParserError::InvalidStringEscape)
+        );
+        assert_eq!(
+            parse_str("\"\\u12\"").map_err(|err| err.error),
+            Err(ParserError::InvalidStringEscape)
+        );
+        assert_eq!(
+            parse_str("\"\\u123\"").map_err(|err| err.error),
+            Err(ParserError::InvalidStringEscape)
+        );
+
+        assert_eq!(
+            parse_str("\"\\u").map_err(|err| err.error),
+            Err(ParserError::InvalidStringEscape)
+        );
+        assert_eq!(
+            parse_str("\"\\u1").map_err(|err| err.error),
+            Err(ParserError::InvalidStringEscape)
+        );
+        assert_eq!(
+            parse_str("\"\\u12").map_err(|err| err.error),
+            Err(ParserError::InvalidStringEscape)
+        );
+        assert_eq!(
+            parse_str("\"\\u123").map_err(|err| err.error),
+            Err(ParserError::InvalidStringEscape)
+        );
+    }
+
     // Tests here taken from
     // https://github.com/utkarshkukreti/edn.rs/blob/master/tests/from_tests.rs#L9
     #[test]
@@ -2279,6 +2350,69 @@ mod tests {
         );
     }
     // -------------------------------------------------------------------------
+
+    #[test]
+    fn from_unit() {
+        assert_eq!(Value::Nil, Value::from(()))
+    }
+
+    #[test]
+    fn from_symbol() {
+        assert_eq!(
+            Value::Symbol(Symbol::from_name("abc")),
+            Value::from(Symbol::from_name("abc"))
+        );
+
+        assert_eq!(
+            Value::Symbol(Symbol::from_namespace_and_name("abc", "def")),
+            Value::from(Symbol::from_namespace_and_name("abc", "def"))
+        );
+    }
+
+    #[test]
+    fn from_keyword() {
+        assert_eq!(
+            Value::Keyword(Keyword::from_name("abc")),
+            Value::from(Keyword::from_name("abc"))
+        );
+
+        assert_eq!(
+            Value::Keyword(Keyword::from_namespace_and_name("abc", "def")),
+            Value::from(Keyword::from_namespace_and_name("abc", "def"))
+        );
+    }
+
+    #[test]
+    fn from_bigint() {
+        assert_eq!(
+            Value::BigInt(BigInt::from(123)),
+            Value::from(BigInt::from(123))
+        );
+    }
+
+    #[test]
+    fn from_bigdec() {
+        assert_eq!(
+            Value::BigDec(BigDecimal::from(123)),
+            Value::from(BigDecimal::from(123))
+        );
+    }
+
+    #[test]
+    fn from_datetime() {
+        assert_eq!(
+            Value::Inst(DateTime::parse_from_rfc3339("1985-04-12T23:20:50.52Z").unwrap()),
+            Value::from(DateTime::parse_from_rfc3339("1985-04-12T23:20:50.52Z").unwrap())
+        )
+    }
+
+    #[test]
+    fn from_uuid() {
+        assert_eq!(
+            Value::Uuid(Uuid::parse_str("f81d4fae-7dec-11d0-a765-00a0c91e6bf6").unwrap()),
+            Value::from(Uuid::parse_str("f81d4fae-7dec-11d0-a765-00a0c91e6bf6").unwrap())
+        )
+    }
 
     #[test]
     fn test_many_values() {
