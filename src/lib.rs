@@ -585,13 +585,13 @@ impl ParseObserver for NoOpParseObserver {
 pub enum Context {
     /// The parser started parsing a vector at the given row and col.
     ParsingVector { row: usize, col: usize },
-    /// The parser started parsing a vector at the given row and col.
+    /// The parser started parsing a list at the given row and col.
     ParsingList { row: usize, col: usize },
-    /// The parser started parsing a vector at the given row and col.
+    /// The parser started parsing a map at the given row and col.
     ParsingMap { row: usize, col: usize },
-    /// The parser started parsing a vector at the given row and col.
+    /// The parser started parsing a set at the given row and col.
     ParsingSet { row: usize, col: usize },
-    /// The parser started parsing a vector at the given row and col.
+    /// The parser started parsing a string at the given row and col.
     ParsingString { row: usize, col: usize },
     /// The parser started parsing an "atom" at the given row and col.
     ///
