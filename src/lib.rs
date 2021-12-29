@@ -1,6 +1,5 @@
 use bigdecimal::{BigDecimal, ParseBigDecimalError};
 use chrono::FixedOffset;
-use internship::IStr;
 use itertools::Itertools;
 use num_bigint::{BigInt, ParseBigIntError};
 use ordered_float::OrderedFloat;
@@ -15,19 +14,16 @@ use uuid::Uuid;
 
 /// A keyword, as described in EDN data model, is identifier which should
 /// "designate itself".
-///
-/// Because its contents are interned, cloning and comparisons should be relatively
-/// cheap operations and construction relatively expensive.
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Keyword {
-    namespace: Option<IStr>,
-    name: IStr,
+    namespace: Option<String>,
+    name: String,
 }
 
 impl Keyword {
     /// The namespace of the keyword, if there is one.
     pub fn namespace(&self) -> Option<&str> {
-        self.namespace.as_ref().map(|s| s.as_str())
+        self.namespace.as_deref()
     }
 
     /// The name of the keyword.
@@ -41,7 +37,7 @@ impl Keyword {
     pub fn from_name(name: &str) -> Keyword {
         Keyword {
             namespace: Option::None,
-            name: IStr::new(name),
+            name: name.to_string(),
         }
     }
 
@@ -51,8 +47,8 @@ impl Keyword {
     /// given would be valid EDN.
     pub fn from_namespace_and_name(namespace: &str, name: &str) -> Keyword {
         Keyword {
-            namespace: Option::Some(IStr::new(namespace)),
-            name: IStr::new(name),
+            namespace: Option::Some(namespace.to_string()),
+            name: name.to_string(),
         }
     }
 }
@@ -69,19 +65,16 @@ impl Display for Keyword {
 }
 
 /// A symbol, as described in EDN data model, is an identifier.
-///
-/// Because its contents are interned, cloning and comparisons should be relatively
-/// cheap operations and construction relatively expensive.
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Symbol {
-    namespace: Option<IStr>,
-    name: IStr,
+    namespace: Option<String>,
+    name: String,
 }
 
 impl Symbol {
     /// The namespace of the symbol, if there is one.
     pub fn namespace(&self) -> Option<&str> {
-        self.namespace.as_ref().map(|s| s.as_str())
+        self.namespace.as_deref()
     }
 
     /// The name of the symbol.
@@ -95,7 +88,7 @@ impl Symbol {
     pub fn from_name(name: &str) -> Symbol {
         Symbol {
             namespace: Option::None,
-            name: IStr::new(name),
+            name: name.to_string(),
         }
     }
 
@@ -105,8 +98,8 @@ impl Symbol {
     /// given would be valid EDN.
     pub fn from_namespace_and_name(namespace: &str, name: &str) -> Symbol {
         Symbol {
-            namespace: Option::Some(IStr::new(namespace)),
-            name: IStr::new(name),
+            namespace: Option::Some(namespace.to_string()),
+            name: name.to_string(),
         }
     }
 }
