@@ -255,9 +255,27 @@ impl From<i64> for Value {
     }
 }
 
+impl From<u32> for Value {
+    fn from(i: u32) -> Self {
+        Value::Integer(i as i64)
+    }
+}
+
+impl From<i32> for Value {
+    fn from(i: i32) -> Self {
+        Value::Integer(i as i64)
+    }
+}
+
 impl From<f64> for Value {
     fn from(f: f64) -> Self {
         Value::Float(OrderedFloat(f))
+    }
+}
+
+impl From<f32> for Value {
+    fn from(f: f32) -> Self {
+        Value::Float(OrderedFloat(f as f64))
     }
 }
 
