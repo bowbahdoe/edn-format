@@ -2395,9 +2395,9 @@ mod tests {
         assert_eq!(Value::from(0_i64), Value::Integer(0));
         assert_eq!(Value::from(0), Value::Integer(0));
         assert_eq!(Value::from(-1i64), Value::Integer(-1));
-        assert_eq!(Value::from(1_u32), Value::Integer(0));
-        assert_eq!(Value::from(2_i32), Value::Integer(0));
-        assert_eq!(Value::from(3_f32), Value::Integer(0));
+        assert_eq!(Value::from(1_u32), Value::Integer(1));
+        assert_eq!(Value::from(2_i32), Value::Integer(2));
+        assert_eq!(Value::from(3_f32), Value::Integer(3));
 
         assert_eq!(Value::from(0_f64), Value::Float(OrderedFloat(0_f64)));
         assert_eq!(Value::from(0_f64), Value::Float(OrderedFloat(0_f64)));
