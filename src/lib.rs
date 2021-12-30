@@ -2397,7 +2397,7 @@ mod tests {
         assert_eq!(Value::from(-1i64), Value::Integer(-1));
         assert_eq!(Value::from(1_u32), Value::Integer(1));
         assert_eq!(Value::from(2_i32), Value::Integer(2));
-        assert_eq!(Value::from(3_f32), Value::Integer(3));
+        assert_eq!(Value::from(3_f32), Value::Float(OrderedFloat(3.0)));
 
         assert_eq!(Value::from(0_f64), Value::Float(OrderedFloat(0_f64)));
         assert_eq!(Value::from(0_f64), Value::Float(OrderedFloat(0_f64)));
@@ -2553,8 +2553,10 @@ mod tests {
 
     #[test]
     fn test_many_values_with_errors_iter() {
-        let mut parser =
-            Parser::from_iter("123 456 :: [] :: [[]]".chars(), ParserOptions::default());
+        let mut parser = Parser::from_iter(
+            "123 456 :: [] :: [[]] ({#{}\"\"})".chars(),
+            ParserOptions::default(),
+        );
         assert_eq!(
             (
                 Some(Ok(Value::from(123))),
@@ -2563,6 +2565,10 @@ mod tests {
                 Some(Ok(Value::Vector(vec![]))),
                 Some(Err(ParserError::CannotHaveColonInKeyword)),
                 Some(Ok(Value::Vector(vec![Value::Vector(vec![])]))),
+                Some(Ok(Value::List(vec![Value::Map(BTreeMap::from([(
+                    Value::Set(BTreeSet::new()),
+                    Value::from("")
+                )]))]))),
                 None,
                 None
             ),
@@ -2574,8 +2580,56 @@ mod tests {
                 parser.next(),
                 parser.next(),
                 parser.next(),
+                parser.next(),
                 parser.next()
             )
         );
+    }
+
+    #[test]
+    pub fn test_only_zero_can_start_like_zero() {
+        assert_eq!(
+            parse_str("08").map_err(|err| err.error),
+            Err(ParserError::OnlyZeroCanStartWithZero)
+        )
+    }
+
+    #[test]
+    pub fn test_bad_float() {
+        assert!(match parse_str("8.j4").map_err(|err| err.error) {
+            Err(ParserError::BadFloat { .. }) => true,
+            _ => false,
+        })
+    }
+
+    #[test]
+    pub fn test_bad_int() {
+        assert!(match parse_str("8j4").map_err(|err| err.error) {
+            Err(ParserError::BadInt { .. }) => true,
+            _ => false,
+        })
+    }
+
+    #[test]
+    pub fn test_symbol_starting_like_number() {
+        assert!(match parse_str("8j/ab").map_err(|err| err.error) {
+            Err(ParserError::InvalidSymbol) => true,
+            _ => false,
+        })
+    }
+    #[test]
+    pub fn test_comments() {
+        assert_eq!(
+            Ok(Value::from(Symbol::from_name("ced"))),
+            parse_str(";; abc \n ;; def \n\n ced").map_err(|err| err.error)
+        )
+    }
+
+    #[test]
+    pub fn test_parse_immediately_ending_vector() {
+        assert_eq!(
+            Err(ParserError::UnexpectedEndOfInput),
+            parse_str("[").map_err(|err| err.error)
+        )
     }
 }
