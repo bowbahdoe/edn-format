@@ -2673,7 +2673,11 @@ mod tests {
     #[test]
     fn test_drop_form() {
         assert_eq!(
-            Ok(Value::Vector(vec![Value::from(1), Value::from(2), Value::from(3)])),
+            Ok(Value::Vector(vec![
+                Value::from(1),
+                Value::from(2),
+                Value::from(3)
+            ])),
             parse_str("[ 1 #_(3 4) #_{} #_[a a a a a a a] 2 #_\"aaa\" 3]").map_err(|err| err.error)
         )
     }
