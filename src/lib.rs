@@ -1105,6 +1105,7 @@ fn parse_helper<Observer: ParseObserver, Iter: Iterator<Item = char>>(
                             observer.advance_one_char(*c);
                             s.next();
                             let _ = parse_helper(s, ParserState::Begin, observer, opts)?;
+                            parser_state = ParserState::Begin;
                         } else if *c == '{' {
                             observer.advance_one_char(*c);
                             s.next();
@@ -2327,7 +2328,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bad_string_escape() {
+    fn test_bad_unicode_string_escape() {
         assert_eq!(
             parse_str("\"\\u\"").map_err(|err| err.error),
             Err(ParserError::InvalidStringEscape)
@@ -2347,6 +2348,10 @@ mod tests {
 
         assert_eq!(
             parse_str("\"\\u").map_err(|err| err.error),
+            Err(ParserError::InvalidStringEscape)
+        );
+        assert_eq!(
+            parse_str("\"\\u\"").map_err(|err| err.error),
             Err(ParserError::InvalidStringEscape)
         );
         assert_eq!(
@@ -2587,7 +2592,7 @@ mod tests {
     }
 
     #[test]
-    pub fn test_only_zero_can_start_like_zero() {
+    fn test_only_zero_can_start_like_zero() {
         assert_eq!(
             parse_str("08").map_err(|err| err.error),
             Err(ParserError::OnlyZeroCanStartWithZero)
@@ -2595,7 +2600,7 @@ mod tests {
     }
 
     #[test]
-    pub fn test_bad_float() {
+    fn test_bad_float() {
         assert!(match parse_str("8.j4").map_err(|err| err.error) {
             Err(ParserError::BadFloat { .. }) => true,
             _ => false,
@@ -2603,7 +2608,7 @@ mod tests {
     }
 
     #[test]
-    pub fn test_bad_int() {
+    fn test_bad_int() {
         assert!(match parse_str("8j4").map_err(|err| err.error) {
             Err(ParserError::BadInt { .. }) => true,
             _ => false,
@@ -2611,14 +2616,14 @@ mod tests {
     }
 
     #[test]
-    pub fn test_symbol_starting_like_number() {
+    fn test_symbol_starting_like_number() {
         assert!(match parse_str("8j/ab").map_err(|err| err.error) {
             Err(ParserError::InvalidSymbol) => true,
             _ => false,
         })
     }
     #[test]
-    pub fn test_comments() {
+    fn test_comments() {
         assert_eq!(
             Ok(Value::from(Symbol::from_name("ced"))),
             parse_str(";; abc \n ;; def \n\n ced").map_err(|err| err.error)
@@ -2626,10 +2631,50 @@ mod tests {
     }
 
     #[test]
-    pub fn test_parse_immediately_ending_vector() {
+    fn test_parse_immediately_ending_vector() {
         assert_eq!(
             Err(ParserError::UnexpectedEndOfInput),
             parse_str("[").map_err(|err| err.error)
+        )
+    }
+
+    #[test]
+    fn test_string_with_semicolon_in_it() {
+        assert_eq!(
+            Ok(Value::from("hello ;;;; world")),
+            parse_str("\"hello ;;;; world\"").map_err(|err| err.error)
+        )
+    }
+
+    #[test]
+    fn test_string_escapes() {
+        assert_eq!(
+            Ok(Value::from("\t\n\\\"\r")),
+            parse_str("\"\\t\\n\\\\\\\"\\r\"").map_err(|err| err.error)
+        )
+    }
+
+    #[test]
+    fn test_bad_string_escape() {
+        assert_eq!(
+            Err(ParserError::InvalidStringEscape),
+            parse_str("\"\\f\"").map_err(|err| err.error)
+        )
+    }
+
+    #[test]
+    fn test_nothing_after_dispatch_char() {
+        assert_eq!(
+            Err(ParserError::UnexpectedEndOfInput),
+            parse_str("#").map_err(|err| err.error)
+        )
+    }
+
+    #[test]
+    fn test_drop_form() {
+        assert_eq!(
+            Ok(Value::Vector(vec![Value::from(1), Value::from(2), Value::from(3)])),
+            parse_str("[ 1 #_(3 4) #_{} #_[a a a a a a a] 2 #_\"aaa\" 3]").map_err(|err| err.error)
         )
     }
 }
