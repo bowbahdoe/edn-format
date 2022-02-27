@@ -871,7 +871,6 @@ fn parse_helper<Observer: ParseObserver, Iter: Iterator<Item = char>>(
                         parser_state = ParserState::ParsingString {
                             built_up: "".to_string(),
                         };
-
                     } else if c == '\\' {
                         s.next();
                         parser_state = ParserState::ParsingCharacter;
