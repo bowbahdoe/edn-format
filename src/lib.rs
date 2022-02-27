@@ -840,7 +840,7 @@ fn parse_helper<Observer: ParseObserver, Iter: Iterator<Item = char>>(
             }
         };
         match &mut parser_state {
-            ParserState::Begin => match s.peek().map(|c| *c) {
+            ParserState::Begin => match s.peek().copied() {
                 None => return Err(ParserError::EmptyInput),
                 Some(c) => {
                     observer.advance_one_char(c);
