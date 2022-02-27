@@ -824,7 +824,10 @@ fn parse_helper<Observer: ParseObserver, Iter: Iterator<Item = char>>(
                 if let Some(';') = s.peek() {
                     loop {
                         match s.next() {
-                            Some('\n') | None => {
+                            None => {
+                                break;
+                            }
+                            Some('\n') => {
                                 observer.advance_one_char('\n');
                                 break;
                             }
@@ -837,41 +840,53 @@ fn parse_helper<Observer: ParseObserver, Iter: Iterator<Item = char>>(
             }
         };
         match &mut parser_state {
-            ParserState::Begin => match s.next() {
+            ParserState::Begin => match s.peek().map(|c| *c) {
                 None => return Err(ParserError::EmptyInput),
                 Some(c) => {
                     observer.advance_one_char(c);
                     if is_whitespace(c) {
+                        s.next();
                         parser_state = ParserState::Begin;
                     } else if c == '(' {
+                        s.next();
                         observer.start_parsing_list();
                         parser_state = ParserState::ParsingList {
                             values_so_far: vec![],
                         };
                     } else if c == '[' {
+                        s.next();
                         observer.start_parsing_vector();
                         parser_state = ParserState::ParsingVector {
                             values_so_far: vec![],
                         };
                     } else if c == '{' {
+                        s.next();
                         observer.start_parsing_map();
                         parser_state = ParserState::ParsingMap {
                             values_so_far: vec![],
                         };
                     } else if c == '"' {
+                        s.next();
                         observer.start_parsing_string();
                         parser_state = ParserState::ParsingString {
                             built_up: "".to_string(),
                         };
+
                     } else if c == '\\' {
+                        s.next();
                         parser_state = ParserState::ParsingCharacter;
                     } else if c == '#' {
+                        s.next();
                         parser_state = ParserState::SelectingDispatch;
                     } else if is_allowed_atom_character(c) || c == ':' {
+                        s.next();
                         let built_up = vec![c];
                         observer.start_parsing_atom();
                         parser_state = ParserState::ParsingAtom { built_up };
+                    } else if c == ';' {
+                        parser_state = ParserState::Begin;
                     } else {
+                        s.next();
                         return Err(ParserError::UnexpectedCharacter(c));
                     }
                 }
@@ -2680,5 +2695,11 @@ mod tests {
             ])),
             parse_str("[ 1 #_(3 4) #_{} #_[a a a a a a a] 2 #_\"aaa\" 3]").map_err(|err| err.error)
         )
+    }
+
+    #[test]
+    fn test_comment_with_spaces() {
+        let parse = parse_str(";; abc\n;; def \n\n ced");
+        assert_eq!(Ok(Value::from(Symbol::from_name("ced"))), parse);
     }
 }
