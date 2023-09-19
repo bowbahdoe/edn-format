@@ -810,7 +810,7 @@ fn interpret_atom(atom: &[char]) -> Result<Value, ParserError> {
 }
 
 /// Likely suboptimal parsing. Focus for now is just on getting correct results.
-fn parse_helper<Observer: ParseObserver, Iter: Iterator<Item = char>>(
+fn parse_helper<Observer: ParseObserver, Iter: Iterator<Item = char> + Clone>(
     s: &mut Peekable<Iter>,
     mut parser_state: ParserState,
     observer: &mut Observer,
@@ -1215,30 +1215,92 @@ fn parse_helper<Observer: ParseObserver, Iter: Iterator<Item = char>>(
             }
 
             ParserState::ParsingCharacter => {
-                let value = parse_helper(s, ParserState::Begin, observer, opts)?;
-                return if let Value::Symbol(symbol) = value {
-                    if symbol.namespace == None {
-                        if symbol.name.len() == 1 {
-                            Ok(Value::Character(symbol.name.chars().next().expect(
-                                "Asserted that this string has at least one character.",
-                            )))
-                        } else {
-                            match symbol.name.as_str() {
-                                "newline" => Ok(Value::Character('\n')),
-                                "return" => Ok(Value::Character('\r')),
-                                "space" => Ok(Value::Character(' ')),
-                                "tab" => Ok(Value::Character('\t')),
-                                _ => Err(ParserError::InvalidCharacterSpecification),
-                            }
-                        }
-                    } else {
-                        Err(ParserError::InvalidCharacterSpecification)
-                    }
-                } else {
-                    Err(ParserError::InvalidCharacterSpecification)
-                };
+                let c = read_character(s)?;
+                return Ok(Value::Character(c));
             }
         }
+    }
+}
+
+fn read_character<I>(iter: &mut Peekable<I>) -> Result<char, ParserError>
+where
+    I: Iterator<Item = char> + Clone,
+{
+    let mut temp_iter = iter.clone();
+    let mut lookahead = String::new();
+
+    // Fill the lookahead string with a snapshot of the next characters (up to 7 in this case)
+    for _ in 0..7 {
+        if let Some(c) = temp_iter.next() {
+            lookahead.push(c);
+        } else {
+            break;
+        }
+    }
+
+    // Now analyze the lookahead string
+    match &lookahead[..] {
+        s if s.starts_with("newline") => {
+            for _ in 0..7 {
+                iter.next();
+            }
+            Ok('\n')
+        }
+        s if s.starts_with("return") => {
+            for _ in 0..6 {
+                iter.next();
+            }
+            Ok('\r')
+        }
+        s if s.starts_with("space") => {
+            for _ in 0..5 {
+                iter.next();
+            }
+            Ok(' ')
+        }
+        s if s.starts_with("tab") => {
+            for _ in 0..3 {
+                iter.next();
+            }
+            Ok('\t')
+        }
+        s if s.starts_with("u") && s.len() >= 5 => {
+            let unicode_repr = &s[1..5];
+            if let Ok(u) = u16::from_str_radix(unicode_repr, 16) {
+                if let Some(chr) = char::from_u32(u as u32) {
+                    for _ in 0..5 {
+                        iter.next();
+                    }
+                    Ok(chr)
+                } else {
+                    Err(ParserError::InvalidCharacterSpecification)
+                }
+            } else {
+                Err(ParserError::InvalidCharacterSpecification)
+            }
+        }
+
+        s if s.len() >= 1 => {
+            let first_char = s.chars().next().unwrap();
+            let second_char = s.chars().nth(1);
+
+            match second_char {
+                Some(second_char) => {
+                    if is_allowed_atom_character(second_char) {
+                        Err(ParserError::InvalidCharacterSpecification)
+                    } else {
+                        iter.next();
+                        Ok(first_char)
+                    }
+                }
+                None => {
+                    iter.next();
+                    Ok(first_char)
+                }
+            }
+        }
+
+        _ => Err(ParserError::InvalidCharacterSpecification),
     }
 }
 
@@ -1440,7 +1502,7 @@ impl<Iter: Iterator<Item = char>> Parser<Iter> {
     }
 }
 
-impl<Iter: Iterator<Item = char>> Iterator for Parser<Iter> {
+impl<Iter: Iterator<Item = char> + Clone> Iterator for Parser<Iter> {
     type Item = Result<Value, ParserError>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -1916,6 +1978,16 @@ mod tests {
 
     #[test]
     fn test_parse_char() {
+        assert_eq!(Value::Character('a'), parse_str("\\a").unwrap());
+        assert_eq!(Value::Character(' '), parse_str("\\space").unwrap());
+        assert_eq!(Value::Character('\n'), parse_str("\\newline").unwrap());
+        assert_eq!(Value::Character('\t'), parse_str("\\tab").unwrap());
+        assert_eq!(Value::Character('\\'), parse_str("\\\\").unwrap());
+        assert_eq!(Value::Character('a'), parse_str("\\u0061").unwrap());
+        assert_eq!(
+            Value::Vector(vec![Value::Character('e'), Value::Character('d')]),
+            parse_str("[\\e \\d]").unwrap()
+        );
         assert_eq!(
             Value::Map(BTreeMap::from_iter(vec![
                 (Value::Character(' '), Value::Character('z')),
