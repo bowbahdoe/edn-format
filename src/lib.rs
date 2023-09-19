@@ -1381,7 +1381,7 @@ impl Display for Value {
                     '\r' => write!(f, "\\return")?,
                     ' ' => write!(f, "\\space")?,
                     '\t' => write!(f, "\\tab")?,
-                    _ => write!(f, "{}", c)?,
+                    _ => write!(f, "\\{}", c)?,
                 };
             }
             Value::Symbol(symbol) => {
