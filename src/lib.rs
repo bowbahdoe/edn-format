@@ -1137,7 +1137,7 @@ fn parse_helper<Observer: ParseObserver, Iter: Iterator<Item = char> + Clone>(
                                         parse_helper(s, ParserState::Begin, observer, opts)?;
 
                                     // Handle builtin #inst
-                                    if symbol.namespace == None && symbol.name == "inst" {
+                                    if symbol.namespace.is_none() && symbol.name == "inst" {
                                         if let Value::String(timestamp) = next_success {
                                             let datetime =
                                                 chrono::DateTime::parse_from_rfc3339(&timestamp)
@@ -1150,7 +1150,7 @@ fn parse_helper<Observer: ParseObserver, Iter: Iterator<Item = char> + Clone>(
                                         }
                                     }
                                     // Handle builtin #uuid
-                                    else if symbol.namespace == None && symbol.name == "uuid" {
+                                    else if symbol.namespace.is_none() && symbol.name == "uuid" {
                                         if let Value::String(uuid_str) = next_success {
                                             let uuid = Uuid::parse_str(&uuid_str).map_err(
                                                 |parse_error| {
@@ -1264,7 +1264,7 @@ where
             }
             Ok('\t')
         }
-        s if s.starts_with("u") && s.len() >= 5 => {
+        s if s.starts_with('u') && s.len() >= 5 => {
             let unicode_repr = &s[1..5];
             if let Ok(u) = u16::from_str_radix(unicode_repr, 16) {
                 if let Some(chr) = char::from_u32(u as u32) {
@@ -1280,7 +1280,7 @@ where
             }
         }
 
-        s if s.len() >= 1 => {
+        s if !s.is_empty() => {
             let first_char = s.chars().next().unwrap();
             let second_char = s.chars().nth(1);
 
